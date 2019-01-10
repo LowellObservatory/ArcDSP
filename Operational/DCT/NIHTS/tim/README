@@ -1,0 +1,7 @@
+This isn't exactly the lod file that is in use at DCT.  The only difference 
+is the value of VOFFSET.  The production one is $0C8BD0 and this one has
+$0C8C20.
+
+See also:
+  NIHTS_DCT_First_First_Light_Notes.txt, the entry on 11/21/15, and
+  DSP Code Versions.txt

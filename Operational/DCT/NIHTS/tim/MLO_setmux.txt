@@ -1,0 +1,76 @@
+NASA42
+SET_MUX	BSET	#3,X:PCRD	; Turn on the serial clock
+	MOVE	X:(R3)+,A	; Clock driver board number
+	REP	#20
+	LSL	A
+	MOVE	#$001000,X0	; Bits to select MUX on ARC32 board
+	OR	X0,A
+	NOP
+	MOVE	A1,X1		; Move here for later use
+	
+; Get the first MUX number
+	MOVE	X:(R3)+,A	; Get the first MUX number
+	TST	A
+	JLT	<ERR_SM1
+	MOVE	#>24,X0		; Check for argument less than 32
+	CMP	X0,A
+	JGE	<ERR_SM1
+	MOVE	A,B
+	MOVE	#>7,X0
+	AND	X0,B
+	MOVE	#>$18,X0
+	AND	X0,A
+	JNE	<SMX_1		; Test for 0 <= MUX number <= 7
+	BSET	#3,B1
+	JMP	<SMX_A
+SMX_1	MOVE	#>$08,X0
+	CMP	X0,A		; Test for 8 <= MUX number <= 15
+	JNE	<SMX_2
+	BSET	#4,B1
+	JMP	<SMX_A
+SMX_2	MOVE	#>$10,X0
+	CMP	X0,A		; Test for 16 <= MUX number <= 23
+	JNE	<ERR_SM1
+	BSET	#5,B1
+SMX_A	OR	X1,B1		; Add prefix to MUX numbers
+	NOP
+	MOVE	B1,Y1
+
+; Add on the second MUX number
+	MOVE	X:(R3)+,A	; Get the next MUX number
+	TST	A
+	JLT	<ERR_SM2
+	MOVE	#>24,X0		; Check for argument less than 32
+	CMP	X0,A
+	JGE	<ERR_SM2
+	REP	#6
+	LSL	A
+	NOP
+	MOVE	A,B
+	MOVE	#$1C0,X0
+	AND	X0,B
+	MOVE	#>$600,X0
+	AND	X0,A
+	JNE	<SMX_3		; Test for 0 <= MUX number <= 7
+	BSET	#9,B1
+	JMP	<SMX_B
+SMX_3	MOVE	#>$200,X0
+	CMP	X0,A		; Test for 8 <= MUX number <= 15
+	JNE	<SMX_4
+	BSET	#10,B1
+	JMP	<SMX_B
+SMX_4	MOVE	#>$400,X0
+	CMP	X0,A		; Test for 16 <= MUX number <= 23
+	JNE	<ERR_SM2
+	BSET	#11,B1
+SMX_B	ADD	Y1,B		; Add prefix to MUX numbers
+	NOP
+	MOVE	B1,A
+	AND	#$F01FFF,A	; Just to be sure
+	JSR	<XMIT_A_WORD	; Transmit A to TIM-A-STD
+	JSR	<PAL_DLY	; Delay for all this to happen
+	BCLR	#3,X:PCRD	; Turn the serial clock off
+	JMP	<FINISH
+ERR_SM1	MOVE	X:(R3)+,A	; Throw off the last argument
+ERR_SM2	BCLR	#3,X:PCRD	; Turn the serial clock off
+	JMP	<ERROR
