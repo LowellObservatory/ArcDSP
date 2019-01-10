@@ -1,0 +1,28 @@
+Prefix: UTIL_DSP_
+MemPrefix: UTIL_MEM_
+//* These are the locations in X and Y memory space that are available for
+/ * application code to communicate with the timing board in the Leach CCD
+/ * electronics.
+/ */
+/
+/
+/// Util board status
+STATUS X
+/ 
+/ 
+/// Util Board DSP code version
+DSP_VERS Y
+/// Values for the UTIL capabilities word
+/
+/// RDA Workaround  capable
+EXPOSECAPABLE   N
+/// History log capable
+PWRCAPABLE   N
+/// Temp Regulation capable
+TEMPREGCAPABLE   N
+/// Write DAC capable
+WDACCAPABLE   N
+/// Write DAC All capable
+WDACALLCAPABLE   N
+/
+/
