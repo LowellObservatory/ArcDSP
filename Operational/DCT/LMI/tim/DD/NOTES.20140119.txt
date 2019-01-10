@@ -1,0 +1,24 @@
+
+
+DUALDD LMI DSP NOTES
+
+1. To prevent trouble, references to VABG were commented out.
+
+2. Although it is said PWR is not used (pre-amp power) it is present in the
+   DAC table so PWR_I, PWR_T and PWR_D levels (all 6.0) are defined.
+
+3. There's a comment in the code regarding VOD
+   "VOD is 1 V lower than specified because of IR drops in the lopass filters"
+   Does this have any bearing on our adopted T and I levels?
+
+4. Values for VOD_MAX, VOG_MAX ad VRD_MAX constant throughout since they
+   appear to be just scaling.
+
+5. There are gain and integrator values in the DAC table- do these vary?
+
+6. Do the video offsets vary?
+
+7. The SBV command was again made a no-op
+
+8. DAC_GNSPD- this is mapped into the DD levels only for setting gain 
+   and speed.
