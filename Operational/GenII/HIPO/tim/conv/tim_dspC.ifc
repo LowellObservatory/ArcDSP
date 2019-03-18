@@ -1,0 +1,75 @@
+Prefix: TIM_DSP_
+MemPrefix: TIM_MEM_
+//* These are the locations in X and Y memory space that are available for
+/ * application code to communicate with the timing board in the Leach CCD
+/ * electronics.
+/ */
+/
+/
+/// Timing board status
+STATUS X
+/ 
+/ 
+
+/// Timing Board DSP code version
+DSP_VERS X
+/// Timing Board DSP code flavor
+DSP_FLAV X
+/// Number of cols to read out (serial shifts)
+NSR Y
+/// Number of rows to read out (parallel shifts)
+NPR Y
+/
+/// Binning parameters
+/
+/// Column binning
+NSBIN Y
+/// Row  binning
+NPBIN Y
+/
+/
+/// DSP independent INF parameters
+/
+/// Standard INFO version word
+GET_VERSION N
+/// Standard INFO flavor word
+GET_FLAVOR N
+/// Standard INFO make time (lo) word
+GET_TIME0 N
+/// Standard INFO make time (hi) word
+GET_TIME1 N
+/// Standard INFO svn rev word
+GET_SVNREV N
+/
+/// tim DSP dependent INF parameters
+/
+/// Standard INFO capabilities word
+GET_CAPABLE   N
+///  integration time word
+GET_INT_TIM   N
+///  serial delay word
+GET_R_DELAY   N
+///  parallel delay word
+GET_SI_DELAY  N
+/
+/// Values for the TIM capabilities word
+/
+/// Find exposure mode capable
+FINDCAPABLE   N
+/// Single exposure mode capable
+SNGLCAPABLE   N
+/// Series exposure mode capable
+SERICAPABLE   N
+/// Basic Occultation exposure mode capable
+BASCCAPABLE   N
+/// Fast Occultation exposure mode capable
+FASTCAPABLE   N
+/// Pipeline Occultation exposure mode capable
+PIPECAPABLE   N
+/// Fast Dots exposure mode capable
+FDOTCAPABLE   N
+/// Slow Dots exposure mode capable
+SDOTCAPABLE   N
+/// Strip exposure mode capable
+STRPCAPABLE   N
+

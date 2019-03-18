@@ -1,0 +1,61 @@
+This is the make directory for the EXPERIMENTAL hipo_DD timing dsp code. 
+
+Currently these 
+dsps are extremely similar to the dsps for hipo_blue and hipo_red, except that
+the waveforms voltages are systematically different. The two e2v deep depletion
+chips in use are identical, so there is no point in having  blue and red sets
+of code.
+
+The makefile in this directory makes tim.lod and tim_dsp.h with 'make', as well as by-product .cln and .cld files. tim_dsp.h is an output include file, a bit 
+deprecated, giving addresses of selected dsp symbols to include in C builds.
+There is also a clean target to allow remake.
+
+The makefile can be modified by changing the macro WAVEDEF to set INT_TIM, 
+SI_DELAY, and R_DELAY. You must select among the following choices:
+
+INT_TIM             SI_DELAY            R_DELAY
+                    80
+04                  82                  00
+08                  84                  08
+18                  85
+18                  
+47                  
+6D
+92
+
+ 
+
+These are literal strings and are quoted, and exactly as above. Do not use a
+leading 0x. The macro 
+definitions used are INTTIM_SETTING, SIDELAY_SETTING, and RDELAY_SETTING.
+
+The makefile can also be modified by changing the macro DWEEBDEF to set the 
+delay parameter for mitigation on SDWBE's- current choices are
+
+SDWB_DELAY
+00
+50
+
+These are approximate delay lengths in msec- 00 is no mitigation.
+
+
+It's also possible to make a family of dsps with the script makealldsps, 
+included in this directory. This is done by first setting the environment
+variables INT_TIM SI_DELAY SDWB and RDELAY to lists where each word is a 
+desired choice for the corresponding make variable, such as
+
+setenv INT_TIM "04 08 8C"
+setenv SDWB "50"
+
+For hipo_DD it's required that RDELAY and SDELAY be single words. Once these 
+variables are set then enter this directory and do a makealldsps. All 
+combinations of the words in these variables will be made and placed in files
+appropriately named as tim.0xii_0xss.lod where ii and ss are the INT_TIM and
+SI_DELAY values respectively. These .lod files will be placed in this 
+directory; it's up to the user to move them anywhere else. Prior to each make a 
+make clean is performed, and one more make clean at the end. A side effect of
+this is that pre-existing tim.lod and other target and intermediate files
+in this directory will be lost. The Makefile and other source files will not
+be touched, even temporarily.
+
+The tim.lod files made by makealldsps are -not- removed by 'make clean'.

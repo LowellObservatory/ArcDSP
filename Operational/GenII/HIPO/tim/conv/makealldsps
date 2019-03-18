@@ -1,0 +1,48 @@
+#! /bin/sh
+# This runs in the make directory
+# see if all the necessary lists are defined
+# these are all environment variables
+if [  "$INT_TIM" = ""  -o "$SI_DELAY" = ""  -o  "$RDELAY" = ""  -o\
+      "$SDWB" = ""  -o "$1" != "" ]; then
+   echo "Usage: $0"
+   echo "You must define list variables INT_TIM, SI_DELAY, RDELAY and SDWB"
+   echo "The dsps's generated represent the Cartesian product of the lists"
+   exit 0
+fi
+# for hipo, make sure RDELAY and SDWB are single words
+if [ `echo $RDELAY | wc -w` -ne 1 -o `echo $SDWB | wc -w` -ne 1 ]; then
+   echo "For hipo_blue and hipo_red, SDWB and RDELAY must be single words"
+   exit 1
+fi
+# build the Cartesian product of the words in each list
+for i in $INT_TIM; do
+   for s in $SI_DELAY; do
+      for r in $RDELAY; do
+         for d in $SDWB; do
+            # playing games here to embed double quotes in the output
+            # : is temporary substitute
+            w="-d INTTIM_SETTING \:$i\: -d SIDELAY_SETTING \:$s\:" 
+            w="$w -d RDELAY_SETTING \:$r\:"
+            # substitute out all the :
+            WAVEDEF=`echo $w | sed 's/\\\:/"/g'`
+
+            # playing games here to embed double quotes in the output
+            # : is temporary substitute
+            w="-d SDWB_DELAY \:$d\:"
+            # substitute out all the :
+            DWEEBDEF=`echo $w | sed 's/\\\:/"/g'`
+
+            # these need to become environment vars to pass to make
+            export WAVEDEF
+            export DWEEBDEF
+
+            # make clean first
+            make clean
+            # make tim.lod
+            make -e tim.lod
+            mv tim.lod tim.0x$i\_0x$s.lod
+          done
+      done
+   done
+done
+make clean
