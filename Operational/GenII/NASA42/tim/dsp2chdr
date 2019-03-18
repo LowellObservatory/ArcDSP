@@ -1,0 +1,82 @@
+#! /usr/bin/perl  -w
+
+# identifies names in dsp assembler .lod files and
+# outputs include file declarations (#define)
+
+# opens the first *.lod file.
+# reads list of names from stdin.
+# one name per line, of the form
+
+#   name  [ X | Y]   [value]
+
+# Any X or Y memory space symbol will match, unless X or Y specified.
+# If value specified, the value must match. 
+
+# Typical usage is in the makefile for the dsp where
+# the .h is made with a line like:
+
+#       dsp2chdr < dsp_C_iface > pcidspsym.h
+
+# where dsp_C_iface lists the symbols to be "published" with lines as
+# above.
+
+# Written 6 March 2007  Peter L. Collins Lowell Observatory
+
+
+sub find_symbols() {
+   $prefix="";
+   while($name= <STDIN>) {
+   if ( $name =~ /^Prefix:/) {
+      $prefix = $name;
+       chomp($prefix);
+      $prefix =~ s/Prefix: //;
+   }
+   if ( $name =~ /^MemPrefix:/) {
+      $memprefix = $name;
+       chomp($memprefix);
+      $memprefix =~ s/MemPrefix: //;
+   }
+   if ( $name =~ "^/" )  {
+      $name =~ s/^.//;
+      print "$name";
+   }
+   chomp($name);
+   $nname = $name;
+   $t = chop($nname);
+   if ( $t eq "X") {
+      $name = $nname;
+   } else { if ( $t eq "Y") {
+      $name = $nname;
+     } else { $t = ""; }
+   }
+   $state = "none";
+   open(SYMFILE, $ARGV[0]);
+   while ( $symbol = <SYMFILE> ) {
+     chomp($symbol);
+     if ( $symbol =~ "^_SYMBOL") {
+        if ( $symbol =~ "^_SYMBOL X") {
+           $state = "X"
+        } else { if ( $symbol =~ "^_SYMBOL Y") {
+           $state = "Y"; }
+           else { $state = "none"; } 
+        }
+     }
+     if ( $state  ne "none") { 
+        $name =~ s/\W.*//;
+        $name = $name . '\s';
+        if ( $symbol =~ /^$name/) {
+	   if ( $t  eq "" || $t eq $state) {
+              $number = $symbol;
+              $symbol =~ s/\W.*//;
+              $number =~ s/.* //;
+              print( "#define $prefix$symbol 0x$number\n");
+              print( "#define $memprefix$symbol '$state'\n");
+	   }
+        }
+     }
+    }
+  }
+}
+
+
+find_symbols();

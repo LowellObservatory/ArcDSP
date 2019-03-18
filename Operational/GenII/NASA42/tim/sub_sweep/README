@@ -1,0 +1,9 @@
+These lod files are for varying effective substrate voltages.  
+
+Can't get DD right except for the 9V case since I picked a bias that can 
+only go to 20V.  It should go up to 29V for the zero substrate case.
+
+Can't quite do the zero volt case properly due to limitations on clock
+and bias voltages.
+
+See notes from 1/14/10, 4/9/10, and 4/11/10 for preparation for this test.
