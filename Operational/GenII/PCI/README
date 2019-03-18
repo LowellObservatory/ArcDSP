@@ -1,0 +1,8 @@
+This is the version last on nasa42 from plcdsp called v1.7_7_5x.
+
+This will be modified for gen-iii ccd boards and will be used with gwaves.
+
+This is used by both HIPO and NASA42 and is called pci.loxx on these machines.
+
+Note that NASAcam doesn't appear to have a special PCI DSP.  It looks like 
+it uses the generic code from Bob.
