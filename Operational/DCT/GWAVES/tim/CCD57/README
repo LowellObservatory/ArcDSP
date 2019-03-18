@@ -1,0 +1,26 @@
+Waveforms Notes for ARC47R1E board				2/21/18 EWD
+
+There are two IMO waveforms files here, 
+
+GWAVES.waveforms.IMO.crossed.s 
+  The polarity bit for the dual slope integrator hasn't been reversed to
+  reflect the new scheme where Pol+ and Pol- are replaced with Pol and an
+  unused bit (bit 2).  This works if you are using differential inputs and
+  cross the inputs with jumpers.  These can be wires if you don't need to
+  reduce the input voltage swings or series resistors if you want to make
+  a voltage divider with the 1K resistor to ground.  The jumpers go from
+  J3-2 to J5-1 and J5-2 to J3-1 for the first channel.  A similar arrangement
+  happens wth J8 & J10 for the second channel.
+
+  This is what we did for the CCD67 GWAVES probes.
+
+GWAVES.waveforms.IMO.straight.s
+  Here the usual jumper arrangements can be made on the video board and the
+  sense of the polarity bit is changed.  It follows the lead of the LMI 
+  waveforms file.  This is required if you aren't using the differential
+  input capability of the video board.  It is an alternative approach if you
+  are using the differential inputs - no "custom" crossed jumpers needed,
+  but if you need a voltage divider you're stuck with some hardware work
+  anyway.
+
+GWAVES.waveforms.IMO.s is a link to one or the other of these.

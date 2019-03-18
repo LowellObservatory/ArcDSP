@@ -1,0 +1,5 @@
+The GWAVES controllers don't have a utility board.
+
+For development purposes use the LMI utility code for the CCD57 test system
+even though it doesn't need a utility board.
+
