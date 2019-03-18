@@ -1,0 +1,3 @@
+This directory includes both timing and utility code.  The Makefile handles
+both of them.  This utility code is very old and doesn't include the
+temperature meta-regulation loop.

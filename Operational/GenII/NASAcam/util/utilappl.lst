@@ -1,0 +1,743 @@
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  utilappl.s  Page 1
+
+
+
+1                               COMMENT *
+2      
+3                        This file is used to generate DSP code for the utility board. It will time
+4                             the exposure, operate the shutter, control the CCD temperature and
+5                             turn the analog power on. This is Rev. 3.00 software.
+6                        Modified 1-12-97 for 10 MHz input clock frequency by adding 2 to elapsed
+7                             exposure time rather than one.
+8                        Power ON sequence written for Gen II power control board, Rev. 4A
+9      
+10                       -d HOST 'HOST'  To generate code for downloading to DSP memory.
+11                       -d HOST 'ROM'   To generate code for writing to the ROM.
+12     
+13                               *
+14                                 PAGE    132                               ; Printronix page width - 132 columns
+15     
+16                       ; Name it a section so it doesn't conflict with other application programs
+17                                 SECTION UTILAPPL
+18     
+19                       ;  These are also defined in "utilboot.asm", so be sure they agree
+20        000090         APL_ADR   EQU     $90                               ; Starting address of application program
+21        000080         BUF_STR   EQU     $80                               ; Starting address of buffers in X:
+22        000020         BUF_LEN   EQU     $20                               ; Length of buffers
+23        000080         SSI_BUF   EQU     BUF_STR                           ; Starting address of SCI buffer in X:
+24        0000A0         COM_BUF   EQU     SSI_BUF+BUF_LEN                   ; Starting address of command buffer in X:
+25        0000C0         COM_TBL   EQU     COM_BUF+BUF_LEN                   ; Starting address of command table in X:
+26     
+27                       ;  Define some useful constants
+28        001EE0         APL_XY    EQU     $1EE0                             ; Starting address in EEPROM of X: and Y: values
+29        000046         DLY_MUX   EQU     70                                ; Number of DSP cycles to delay for MUX settling
+30        000064         DLY_AD    EQU     100                               ; Number of DSP cycles to delay for A/D settling
+31     
+32                       ; Assign addresses to port B data register
+33        00FFE4         PBD       EQU     $FFE4                             ; Port B Data Register
+34        00FFFF         IPR       EQU     $FFFF                             ; Interrupt Priority Register
+35     
+36                       ;  Addresses of memory mapped components in Y: data memory space
+37                       ;  Write addresses first
+38        00FFF0         WR_DIG    EQU     $FFF0                             ; was $FFFF  Write Digital output values D00-D15
+39        00FFF1         WR_MUX    EQU     $FFF1                             ; Select MUX connected to A/D input - one of 16
+40        00FFF2         EN_DIG    EQU     $FFF2                             ; Enable digital outputs
+41        00FFF7         WR_DAC3   EQU     $FFF7                             ; Write to DAC#3 D00-D11
+42        00FFF6         WR_DAC2   EQU     $FFF6                             ; Write to DAC#2 D00-D11
+43        00FFF5         WR_DAC1   EQU     $FFF5                             ; Write to DAC#1 D00-D11
+44        00FFF4         WR_DAC0   EQU     $FFF4                             ; Write to DAC#0 D00-D11
+45                       ;WR_DAC0        EQU     $FFF6           ; Redirect Heater DAC
+46                       ;WR_DAC1        EQU     $FFF7           ; Redirect Heater DAC
+47     
+48                       ;  Read addresses next
+49        00FFF0         RD_DIG    EQU     $FFF0                             ; Read Digital input values D00-D15
+50        00FFF1         STR_ADC   EQU     $FFF1                             ; Start ADC conversion, ignore data
+51        00FFF2         RD_ADC    EQU     $FFF2                             ; Read A/D converter value D00-D11
+52        00FFF7         WATCH     EQU     $FFF7                             ; Watch dog timer - tell it that DSP is alive
+53     
+54                       ;  Bit definitions of STATUS word
+55        000000         ST_SRVC   EQU     0                                 ; Set if ADC routine needs executing
+56        000001         ST_EX     EQU     1                                 ; Set if timed exposure is in progress
+57        000002         ST_SH     EQU     2                                 ; Set if shutter is open
+58        000003         ST_READ   EQU     3                                 ; Set if a readout needs to be initiated
+59        000004         STRT_EX   EQU     4                                 ; Set to indicate start of exposure
+60        000007         DITHMODE  EQU     7                                 ; Set for dithering during exp.  Bash to set
+61        000008         CONT_EX   EQU     8                                 ; Set to indicate cont. exp mode. Bash to set
+62     
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  utilappl.s  Page 2
+
+
+
+63                       ; Bit definitions of software OPTIONS word
+64        000000         OPT_SH    EQU     0                                 ; Set to open and close shutter.  Bash to set
+65     
+66                       ;  Bit definitions of Port B = Host Processor Interface
+67        000000         PWR_EN1   EQU     0                                 ; Power enable bit ONE - Output
+68        000001         PWR_EN0   EQU     1                                 ; Power enable bit ZERO  - Output
+69        000002         PWRST     EQU     2                                 ; Reset power conditioner counter - Output
+70        000003         SHUTTER   EQU     3                                 ; Control shutter - Output
+71        000004         IRQ_T     EQU     4                                 ; Request interrupt service from timing board - Output
+72        000005         SYS_RST   EQU     5                                 ; Reset entire system - Output
+73        000008         WATCH_T   EQU     8                                 ; Processed watchdog signal from timing board - Input
+74     
+75                       ;**************************************************************************
+76                       ;                                                                         *
+77                       ;    Register assignments                                                 *
+78                       ;        R1 - Address of SCI receiver contents                            *
+79                       ;        R2 - Address of processed SCI receiver contents                  *
+80                       ;        R3 - Pointer to current top of command buffer                    *
+81                       ;        R4 - Pointer to processed contents of command buffer             *
+82                       ;        N4 - Address for internal jumps after receiving 'DON' replies    *
+83                       ;        R0, R5, R6, A, X0, X1 - For use by program only                  *
+84                       ;        R7 - For use by SCI ISR only                                     *
+85                       ;        Y0, Y1, and B - For use by timer ISR only. If any of these       *
+86                       ;               registers are needed elsewhere they must be saved and     *
+87                       ;               restored in the TIMER ISR.                                *
+88                       ;**************************************************************************
+89     
+90                       ; Specify execution and load addresses.
+91        P:0090 P:0090                   ORG     P:APL_ADR,P:APL_ADR
+92                              ; The TIMER addresses must be defined here and SERVICE must follow to match
+93                              ;   up with the utilboot code
+94        P:0090 P:0090 0C00CA            JMP     <SERVICE                          ; Millisecond timer interrupt
+95     
+96        P:0091 P:0091 000004  TIMER     RTI                                       ; RTI for now so downloading works
+97        P:0092 P:0092 0A0160            BSET    #0,Y:<DIG_OUT                     ; FIDUCIAL PULSE
+98        P:0093 P:0093 09F4B2            MOVEP             #1,Y:EN_DIG             ; Enable digital outputs
+                        000001
+99        P:0095 P:0095 09F0F0            MOVEP             Y:DIG_OUT,Y:WR_DIG      ; Write 16 digital outputs
+                        000001
+100       P:0097 P:0097 0A0081            JCLR    #ST_EX,X:STATUS,NO_TIM            ; Continue on if we're not exposing
+                        0000C1
+101       P:0099 P:0099 0A0084            JCLR    #STRT_EX,X:<STATUS,EX_STRT        ; Skip if exposure has been started
+                        0000A4
+102       P:009B P:009B 0A0004            BCLR    #STRT_EX,X:<STATUS                ; Clear status = "not start of exposure"
+103       P:009C P:009C 20001B            CLR     B
+104       P:009D P:009D 5F1700            MOVE                          B,Y:<EL_TIM_MSECONDS ; Initialize elapsed time
+105       P:009E P:009E 5F3700            MOVE                          B,Y:<EL_TIM_FRACTION
+106       P:009F P:009F 5F3D00            MOVE                          B,Y:<NUMPIC ; clear number of pix in series
+107       P:00A0 P:00A0 0A0080            JCLR    #OPT_SH,X:<OPTIONS,NO_TIM         ; Don't open shutter if a dark frame
+                        0000C1
+108       P:00A2 P:00A2 0D014A            JSR     <OSHUT                            ; Open shutter if start of exposure
+109       P:00A3 P:00A3 0C00C1            JMP     <NO_TIM                           ; Don't increment EL_TIM at first
+110                             EX_STRT
+111       P:00A4 P:00A4 4EB81B            CLR     B                     Y:<INCR,Y0  ; INCR = 0.8 milli? seconds
+112       P:00A5 P:00A5 478000            MOVE              X:<ZERO,Y1
+113       P:00A6 P:00A6 5D9700            MOVE                          Y:<EL_TIM_MSECONDS,B1 ; Get elapsed time
+114       P:00A7 P:00A7 59B700            MOVE                          Y:<EL_TIM_FRACTION,B0
+115       P:00A8 P:00A8 4F9838            ADD     Y,B                   Y:<TGT_TIM,Y1 ; EL_TIM = EL_TIM + 0.8 milliseconds
+116       P:00A9 P:00A9 593700            MOVE                          B0,Y:<EL_TIM_FRACTION
+117       P:00AA P:00AA 5D177C            SUB     Y1,B                  B1,Y:<EL_TIM_MSECONDS
+118       P:00AB P:00AB 0E90C1            JLT     <NO_TIM                           ; If (EL .GE. TGT) we've timed out
+119    
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  utilappl.s  Page 3
+
+
+
+120                             ; Close the shutter at once if needed
+121       P:00AC P:00AC 0A0080            JCLR    #OPT_SH,X:OPTIONS,NO_SHUT         ; Close the shutter only if needed
+                        0000B0
+122       P:00AE P:00AE 0AA403            BCLR    #SHUTTER,X:PBD                    ; Set Port B bit #3 to close shutter
+123       P:00AF P:00AF 0A0022            BSET    #ST_SH,X:<STATUS                  ; Set status to mean shutter closed
+124    
+125                             ; Wait SH_DLY milliseconds for the shutter to fully close before reading out
+126                             NO_SHUT
+127       P:00B0 P:00B0 4FB900            MOVE                          Y:<SH_DEL,Y1 ; Get shutter closing time
+128       P:00B1 P:00B1 20007C            SUB     Y1,B                              ; B = EL_TIM - (TGT_TIM + SH_DEL)
+129       P:00B2 P:00B2 0E90C1            JLT     <NO_TIM                           ; If (EL .GE. TGT+DEL) we've timed out
+130       P:00B3 P:00B3 0A0023            BSET    #ST_READ,X:<STATUS                ; Set so a readout will be initiated
+131       P:00B4 P:00B4 20001B            CLR     B
+132       P:00B5 P:00B5 5F1700            MOVE                          B,Y:<EL_TIM_MSECONDS ; Initialize elapsed time
+133       P:00B6 P:00B6 5F3700            MOVE                          B,Y:<EL_TIM_FRACTION ; for next image in series
+134       P:00B7 P:00B7 59BD00            MOVE                          Y:<NUMPIC,B0 ; Increment NUMPIC
+135       P:00B8 P:00B8 000009            INC     B
+136       P:00B9 P:00B9 593D00            MOVE                          B0,Y:<NUMPIC
+137       P:00BA P:00BA 4EF000            MOVE                          Y:TGT_PIC,Y0 ; Get target number of pix
+                        00003C
+138       P:00BC P:00BC 478000            MOVE              X:<ZERO,Y1
+139       P:00BD P:00BD 20003C            SUB     Y,B
+140       P:00BE P:00BE 0E90C1            JLT     <NO_TIM                           ; If NUMPIC .GE. TGT_PIC, done
+141       P:00BF P:00BF 0A0001            BCLR    #ST_EX,X:<STATUS                  ; No longer exposing
+142       P:00C0 P:00C0 0A0008            BCLR    #CONT_EX,X:<STATUS                ; or taking a series
+143    
+144                             ; Return from interrupt
+145                             NO_TIM
+146       P:00C1 P:00C1 0A0020            BSET    #ST_SRVC,X:<STATUS                ; SERVICE needs executing
+147       P:00C2 P:00C2 0A0140            BCLR    #0,Y:<DIG_OUT                     ; FIDUCIAL PULSE
+148       P:00C3 P:00C3 09F4B2            MOVEP             #1,Y:EN_DIG             ; Enable digital outputs
+                        000001
+149       P:00C5 P:00C5 09F0F0            MOVEP             Y:DIG_OUT,Y:WR_DIG      ; Write 16 digital outputs
+                        000001
+150       P:00C7 P:00C7 05B679            MOVEC                         Y:<SV_SR,SR ; Restore Status Register
+151       P:00C8 P:00C8 000000            NOP
+152       P:00C9 P:00C9 000004            RTI                                       ; Return from TIMER interrupt
+153    
+154                             ; This long subroutine is executed every millisecond, but isn't an ISR so
+155                             ;   that care need not be taken to preserve registers and stacks.
+156                             SERVICE
+157       P:00CA P:00CA 0A0000            BCLR    #ST_SRVC,X:<STATUS                ; Clear request to execute SERVICE
+158       P:00CB P:00CB 0A0083            JCLR    #ST_READ,X:<STATUS,DTH_CHK        ; Initiate readout?
+                        0000D5
+159    
+160                             ; Extra call if using the VME interface board
+161                                       IF      @SCP("INTERFACE","VME")
+166                                       ENDIF
+167    
+168       P:00CD P:00CD 568000            MOVE              X:<TIMING,A
+169       P:00CE P:00CE 565B00            MOVE              A,X:(R3)+               ; Header from Utility to timing
+170       P:00CF P:00CF 5EA900            MOVE                          Y:<RDC,A
+171       P:00D0 P:00D0 565B00            MOVE              A,X:(R3)+               ; Start reading out the CCD
+172       P:00D1 P:00D1 0A0003            BCLR    #ST_READ,X:<STATUS                ; Readout will be initiated
+173       P:00D2 P:00D2 0A00A8            JSET    #CONT_EX,X:STATUS,BAILOUT         ; Don't clear ST_EX if series
+                        0000D5
+174       P:00D4 P:00D4 0A0001            BCLR    #ST_EX,X:<STATUS                  ; Exposure is no longer in progress
+175                             BAILOUT
+176                             ;       MOVEP   Y:WATCH,X0              ; Reset Watchdog Timer
+177                             ;       RTS                             ; Return now to save time
+178    
+179                             ; If we are supposed to dither, put a DTH command to timer on queue
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  utilappl.s  Page 4
+
+
+
+180       P:00D5 P:00D5 0A0087  DTH_CHK   JCLR    #DITHMODE,X:<STATUS,UPD_DIG
+                        0000DB
+181       P:00D7 P:00D7 568000            MOVE              X:<TIMING,A
+182       P:00D8 P:00D8 565B00            MOVE              A,X:(R3)+               ; Header from Utility to timing
+183       P:00D9 P:00D9 5EB300            MOVE                          Y:<DTH,A
+184       P:00DA P:00DA 565B00            MOVE              A,X:(R3)+               ; Dither command to queue
+185    
+186                             ; Update all the digital input/outputs; reset watchdog timer
+187       P:00DB P:00DB 0970F0  UPD_DIG   MOVEP             Y:RD_DIG,Y:DIG_IN       ; Read 16 digital inputs
+                        000000
+188       P:00DD P:00DD 0A0161            BSET    #1,Y:<DIG_OUT                     ; FIDUCIAL PULSE
+189       P:00DE P:00DE 09F4B2            MOVEP             #1,Y:EN_DIG             ; Enable digital outputs
+                        000001
+190       P:00E0 P:00E0 09F0F0            MOVEP             Y:DIG_OUT,Y:WR_DIG      ; Write 16 digital outputs
+                        000001
+191       P:00E2 P:00E2 094437            MOVEP             Y:WATCH,X0              ; Reset watchdog timer
+192                             ; Update the 4 DACs
+193       P:00E3 P:00E3 09F0F4            MOVEP             Y:DAC0,Y:WR_DAC0        ; Write to DAC0
+                        000002
+194       P:00E5 P:00E5 09F0F5            MOVEP             Y:DAC1,Y:WR_DAC1        ; Write to DAC1
+                        000003
+195       P:00E7 P:00E7 09F0F6            MOVEP             Y:DAC2,Y:WR_DAC2        ; Write to DAC2
+                        000004
+196       P:00E9 P:00E9 09F0F7            MOVEP             Y:DAC3,Y:WR_DAC3        ; Write to DAC3
+                        000005
+197    
+198                             ; Analog Input processor - read the 16 A/D inputs
+199       P:00EB P:00EB 448000            MOVE              X:<ONE,X0               ; For incrementing accumulator to select MUX
+200       P:00EC P:00EC 350713            CLR     A         #<AD_IN,R5              ; Will contain MUX number
+201       P:00ED P:00ED 060640            DO      Y:NUM_AD,LOOP_AD                  ; Loop over each A/D converter input
+                        0000FC
+202       P:00EF P:00EF 09CE31            MOVEP             A,Y:WR_MUX              ; Select MUX input
+203       P:00F0 P:00F0 064680            DO      #DLY_MUX,L_AD1                    ; Wait for the MUX to settle
+                        0000F2
+204       P:00F2 P:00F2 5C3500            MOVE                          A1,Y:<SV_A1 ; DO needed so SSI input can come in
+205                             L_AD1
+206       P:00F3 P:00F3 094531            MOVEP             Y:STR_ADC,X1            ; Start A/D conversion - dummy read
+207       P:00F4 P:00F4 066480            DO      #DLY_AD,L_AD2                     ; Wait for the A/D to settle
+                        0000F6
+208       P:00F6 P:00F6 458000            MOVE              X:<CFFF,X1
+209                             L_AD2
+210       P:00F7 P:00F7 094C32            MOVEP             Y:RD_ADC,A1             ; Get the A/D value
+211       P:00F8 P:00F8 200066            AND     X1,A                              ; A/D is only valid to 12 bits
+212       P:00F9 P:00F9 0BCC4B            BCHG    #11,A1                            ; Change 12-bit 2's complement to unipolar
+213       P:00FA P:00FA 5C5D00            MOVE                          A1,Y:(R5)+  ; Put the A/D value in the table
+214       P:00FB P:00FB 5CB500            MOVE                          Y:<SV_A1,A1 ; Restore A1 = MUX number
+215       P:00FC P:00FC 200040            ADD     X0,A                              ; Increment A = MUX number by one
+216                             LOOP_AD
+217       P:00FD P:00FD 09F0B1            MOVEP             X:ONE,Y:WR_MUX          ; Sample +5V when idle
+                        000000
+218    
+219                             ; Control the CCD Temperature
+220                             ; The algorithmn assumes a reverse biased diode whose A/D count A_CCDT
+221                             ;   is proportional to temperature. Don't start controlling temperature
+222                             ;   until it falls below target temperature. ADUs decrease with temp.
+223                             ; Changed to run an RTD where the ADUs increase with temperature.
+224                             ; Modified to average a bunch of temps, then change the heater current
+225                             ; For initialization, depend on assembler setting to zero.
+226       P:00FF P:00FF 4C8D00            MOVE                          Y:<B_CCDT,X0 ; Get Cold Head temperature
+227       P:0100 P:0100 58F000            MOVE                          Y:TH_SUM,A0 ; Get CH running Sum
+                        000042
+228       P:0102 P:0102 548000            MOVE              X:<ZERO,A1
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  utilappl.s  Page 5
+
+
+
+229       P:0103 P:0103 218500            MOVE              A1,X1
+230       P:0104 P:0104 200020            ADD     X,A                               ; Add CH to running sum
+231       P:0105 P:0105 587000            MOVE                          A0,Y:TH_SUM ; and store it
+                        000042
+232       P:0107 P:0107 58F000            MOVE                          Y:TH_COUNT,A0 ; Get the count
+                        000041
+233       P:0109 P:0109 000008            INC     A                                 ; Add 1
+234       P:010A P:010A 587000            MOVE                          A0,Y:TH_COUNT ; and store it
+                        000041
+235       P:010C P:010C 4CF000            MOVE                          Y:ONE_K,X0  ; Get number to average
+                        000044
+236       P:010E P:010E 200024            SUB     X,A
+237       P:010F P:010F 0E911C            JLT     <C_TEMP                           ; If T_COUNT .GE. 1024, find avg, update
+238       P:0110 P:0110 58F000            MOVE                          Y:TH_SUM,A0 ; Here if done.  Get final sum
+                        000042
+239       P:0112 P:0112 060AA0            REP     #10
+240       P:0113 P:0113 200022            ASR     A                                 ; Averaging the temperature
+241       P:0114 P:0114 587000            MOVE                          A0,Y:TH_AVG ; Save the average temperature
+                        000043
+242       P:0116 P:0116 210400            MOVE              A0,X0                   ; and stick in X0
+243       P:0117 P:0117 200013            CLR     A                                 ; Now clear sum and count
+244       P:0118 P:0118 587000            MOVE                          A0,Y:TH_SUM
+                        000042
+245       P:011A P:011A 587000            MOVE                          A0,Y:TH_COUNT
+                        000041
+246                             ; This is section handles the CCD temperature. It reads the temp then
+247                             ; averages and applies the heater current if necessary
+248                             C_TEMP
+249       P:011C P:011C 4C8C00            MOVE                          Y:<A_CCDT,X0 ; Get actual CCD temperature
+250       P:011D P:011D 58BF00            MOVE                          Y:<T_SUM,A0 ; Get the running sum
+251       P:011E P:011E 548000            MOVE              X:<ZERO,A1
+252       P:011F P:011F 218500            MOVE              A1,X1
+253       P:0120 P:0120 200020            ADD     X,A                               ; add on this temperature
+254       P:0121 P:0121 583F00            MOVE                          A0,Y:<T_SUM ; and store it
+255       P:0122 P:0122 58BE00            MOVE                          Y:<T_COUNT,A0 ; Get the count
+256       P:0123 P:0123 000008            INC     A                                 ; Add 1
+257       P:0124 P:0124 583E00            MOVE                          A0,Y:<T_COUNT ; and store it
+258       P:0125 P:0125 4CF000            MOVE                          Y:ONE_K,X0  ; Get number to average
+                        000044
+259       P:0127 P:0127 200024            SUB     X,A
+260       P:0128 P:0128 0E9144            JLT     <SKIP_T                           ; If T_COUNT .GE. 1024, find avg, update
+261       P:0129 P:0129 58BF00            MOVE                          Y:<T_SUM,A0 ; Here if done.  Get final sum
+262       P:012A P:012A 060AA0            REP     #10
+263       P:012B P:012B 200022            ASR     A                                 ; Averaging the temperature
+264       P:012C P:012C 587000            MOVE                          A0,Y:T_AVG  ; Save the average temperature
+                        000040
+265       P:012E P:012E 210400            MOVE              A0,X0                   ; and stick in X0
+266       P:012F P:012F 200013            CLR     A                                 ; Now clear sum and count
+267       P:0130 P:0130 583F00            MOVE                          A0,Y:<T_SUM
+268       P:0131 P:0131 583E00            MOVE                          A0,Y:<T_COUNT
+269       P:0132 P:0132 5E9C00            MOVE                          Y:<T_CCDT,A ; Get target CCD temperature
+270       P:0133 P:0133 200044            SUB     X0,A
+271       P:0134 P:0134 21C400            MOVE              A,X0                    ; X0 now target - actual
+272       P:0135 P:0135 4D9D00            MOVE                          Y:<T_COEFF,X1
+273       P:0136 P:0136 2000A0            MPY     X0,X1,A                           ; A = (target - actual) * T_COEFF
+274       P:0137 P:0137 200022            ASR     A                                 ; Shift right to fix *2
+275       P:0138 P:0138 4CB400            MOVE                          Y:<CC00,X0  ; Heats greater than this are not allowed
+276       P:0139 P:0139 210C00            MOVE              A0,A1                   ;
+277       P:013A P:013A 200045            CMP     X0,A
+278       P:013B P:013B 0E913E            JLT     <TST_LOW
+279       P:013C P:013C 208E00            MOVE              X0,A                    ; Make it the maximum heat
+280       P:013D P:013D 0C0141            JMP     <WR_DAC
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  utilappl.s  Page 6
+
+
+
+281                             TST_LOW
+282       P:013E P:013E 200003            TST     A                                 ; Heats of less than zero are not allowed
+283       P:013F P:013F 0E7141            JGT     <WR_DAC
+284       P:0140 P:0140 568000            MOVE              X:<ZERO,A               ; No heat
+285                             WR_DAC
+286       P:0141 P:0141 09CC34            MOVEP             A1,Y:WR_DAC0            ; Update DAC and record of it
+287       P:0142 P:0142 5C0200            MOVE                          A1,Y:<DAC0
+288       P:0143 P:0143 5C1E00            MOVE                          A1,Y:<DAC0_LS
+289                             SKIP_T
+290       P:0144 P:0144 0A0141            BCLR    #1,Y:<DIG_OUT                     ; FIDUCIAL PULSE
+291       P:0145 P:0145 09F4B2            MOVEP             #1,Y:EN_DIG             ; Enable digital outputs
+                        000001
+292       P:0147 P:0147 09F0F0            MOVEP             Y:DIG_OUT,Y:WR_DIG      ; Write 16 digital outputs
+                        000001
+293       P:0149 P:0149 00000C            RTS                                       ; Return from subroutine SERVICE call
+294    
+295                             ; Shutter support subroutines for the TIMER executive
+296                             ; Also support shutter connection to timing board for now.
+297       P:014A P:014A 0AA423  OSHUT     BSET    #SHUTTER,X:PBD                    ; Clear Port B bit #3 to open shutter
+298       P:014B P:014B 0A0002            BCLR    #ST_SH,X:<STATUS                  ; Clear status bit to mean shutter open
+299       P:014C P:014C 00000C            RTS
+300    
+301       P:014D P:014D 0AA403  CSHUT     BCLR    #SHUTTER,X:PBD                    ; Set Port B bit #3 to close shutter
+302       P:014E P:014E 0A0022            BSET    #ST_SH,X:<STATUS                  ; Set status to mean shutter closed
+303       P:014F P:014F 00000C            RTS
+304    
+305                             ; These are called directly by command, so need to call subroutines in turn
+306       P:0150 P:0150 0D014A  OPEN      JSR     OSHUT                             ; Call open shutter subroutine
+307       P:0151 P:0151 0C0000            JMP     <FINISH                           ; Send 'DON' reply
+308       P:0152 P:0152 0D014D  CLOSE     JSR     CSHUT                             ; Call close shutter subroutine
+309       P:0153 P:0153 0C0000            JMP     <FINISH                           ; Send 'DON' reply
+310    
+311    
+312                             ;  **************  BEGIN  COMMAND  PROCESSING  ***************
+313                             ; Power off
+314                                       IF      @SCP("POWER","R6")
+319                                       ELSE                                      ; Earlier Revision power control boards
+320                             PWR_OFF
+321       P:0154 P:0154 0AA422            BSET    #PWRST,X:PBD                      ; Reset power control board
+322       P:0155 P:0155 0AA402            BCLR    #PWRST,X:PBD
+323                                       ENDIF
+324       P:0156 P:0156 0C0000            JMP     <FINISH                           ; Reply 'DON'
+325    
+326                             ; Start power-on cycle
+327                             ; PWRST must be the same as PWR_EN0 because they're connected on the backplane
+328                             PWR_ON
+329       P:0157 P:0157 08F4BF            MOVEP             #$2000,X:IPR            ; Disable TIMER interrupts
+                        002000
+330       P:0159 P:0159 0A7029            BSET    #9,X:PBDDR                        ; Make sure PWREN is an input
+                        000000
+331                                       IF      @SCP("POWER","R6")
+335                                       ELSE
+336       P:015B P:015B 0AA422            BSET    #PWRST,X:PBD                      ; Reset power control board
+337       P:015C P:015C 061EA0            REP     #30
+338       P:015D P:015D 000000            NOP
+339       P:015E P:015E 0AA402            BCLR    #PWRST,X:PBD
+340                                       ENDIF
+341    
+342                             ; Set up the bias voltage DACs and clock drivers on the analog boards
+343       P:015F P:015F 568000            MOVE              X:<TIMING,A
+344       P:0160 P:0160 565B00            MOVE              A,X:(R3)+               ; Header from Utility to timing
+345       P:0161 P:0161 5EB000            MOVE                          Y:<IDL,A
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  utilappl.s  Page 7
+
+
+
+346       P:0162 P:0162 565B00            MOVE              A,X:(R3)+               ; Start up the clock drivers
+347       P:0163 P:0163 74F400            MOVE              #PWR_ON1,N4             ; Set internal jump address after 'DON'
+                        000166
+348       P:0165 P:0165 0C0000            JMP     <XMT_CHK                          ; Send out commands to timing board
+349    
+350                             ; Wait a little while for at least one cycle of serial and parallel clocks
+351                             PWR_ON1
+352       P:0166 P:0166 44F400            MOVE              #30000,X0
+                        007530
+353       P:0168 P:0168 06C400            DO      X0,WT_PON1                        ; Wait 20 millisec or so for settling
+                        00016B
+354       P:016A P:016A 0605A0            REP     #5
+355       P:016B P:016B 094437            MOVEP             Y:WATCH,X0              ; Reset watchdog timer
+356                             WT_PON1
+357       P:016C P:016C 568000            MOVE              X:<TIMING,A
+358       P:016D P:016D 565B00            MOVE              A,X:(R3)+               ; Header from Utility to timing
+359       P:016E P:016E 5EB100            MOVE                          Y:<STP,A
+360       P:016F P:016F 565B00            MOVE              A,X:(R3)+               ; Stop the clocks during power on
+361       P:0170 P:0170 74F400            MOVE              #PWR_ON2,N4             ; Set internal jump address after 'DON'
+                        000173
+362       P:0172 P:0172 0C0000            JMP     <XMT_CHK                          ; Send the command to the timing board
+363    
+364                             ; Now ramp up the low voltages (+/- 6.5V, 16.5V)
+365                                       IF      @SCP("POWER","R6")
+368                                       ELSE
+369       P:0173 P:0173 0AA420  PWR_ON2   BSET    #LVEN,X:PBD                       ; Make sure line is high to start with
+370       P:0174 P:0174 06FF80            DO      #255,L_PON1                       ; The power conditioner board wants to
+                        000177
+371       P:0176 P:0176 0BA400            BCHG    #LVEN,X:PBD                       ;   see 128 H --> L transitions
+372       P:0177 P:0177 000000            NOP                                       ; Backplane signal settling time delay
+373                             L_PON1
+374                                       ENDIF
+375    
+376       P:0178 P:0178 0D01C5            JSR     <PWR_DLY                          ; Delay for a little while
+377       P:0179 P:0179 09F4B1            MOVEP             #2,Y:WR_MUX             ; Select +15V MUX input
+                        000002
+378       P:017B P:017B 44F400            MOVE              #40000,X0
+                        009C40
+379       P:017D P:017D 06C400            DO      X0,WT_PON2                        ; Wait 20 millisec or so for settling
+                        000180
+380       P:017F P:017F 0605A0            REP     #5
+381       P:0180 P:0180 094437            MOVEP             Y:WATCH,X0              ; Reset watchdog timer
+382                             WT_PON2
+383       P:0181 P:0181 094431            MOVEP             Y:STR_ADC,X0            ; Start A/D conversion - dummy read
+384       P:0182 P:0182 066480            DO      #DLY_AD,L_PON2                    ; Wait for the A/D to settle
+                        000184
+385       P:0184 P:0184 448013            CLR     A         X:<CFFF,X0              ; This saves some space
+386                             L_PON2
+387       P:0185 P:0185 094C32            MOVEP             Y:RD_ADC,A1             ; Get the A/D value
+388       P:0186 P:0186 4CA146            AND     X0,A                  Y:<T_P15,X0 ; A/D is only valid to 12 bits
+389    
+390                             ; Test that the voltage is in the range abs(initial - target) < margin
+391       P:0187 P:0187 5C2644            SUB     X0,A                  A1,Y:<I_P15
+392       P:0188 P:0188 4CA226            ABS     A                     Y:<K_P15,X0
+393       P:0189 P:0189 200044            SUB     X0,A
+394       P:018A P:018A 0E71BE            JGT     <PERR                             ; Take corrective action
+395    
+396       P:018B P:018B 09F4B1  TST_M15   MOVEP             #3,Y:WR_MUX             ; Select -15v MUX input
+                        000003
+397       P:018D P:018D 064680            DO      #DLY_MUX,L_PON3                   ; Wait for the MUX to settle
+                        00018F
+398       P:018F P:018F 000000            NOP
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  utilappl.s  Page 8
+
+
+
+399                             L_PON3
+400       P:0190 P:0190 094431            MOVEP             Y:STR_ADC,X0            ; Start A/D conversion - dummy read
+401       P:0191 P:0191 066480            DO      #DLY_AD,L_PON4                    ; Wait for the A/D to settle
+                        000193
+402       P:0193 P:0193 448013            CLR     A         X:<CFFF,X0              ; Clear A, so put it in DO loop
+403                             L_PON4
+404       P:0194 P:0194 094C32            MOVEP             Y:RD_ADC,A1             ; Get the A/D value
+405       P:0195 P:0195 4CA346            AND     X0,A                  Y:<T_M15,X0 ; A/D is only valid to 12 bits
+406    
+407                             ; Test that the voltage is in the range abs(initial - target) < margin
+408       P:0196 P:0196 5C2744            SUB     X0,A                  A1,Y:<I_M15
+409       P:0197 P:0197 4CA426            ABS     A                     Y:<K_M15,X0
+410       P:0198 P:0198 200044            SUB     X0,A
+411       P:0199 P:0199 0E71BE            JGT     <PERR
+412    
+413                             ; Now turn on the high voltage HV (nominally +36 volts)
+414                                       IF      @SCP("POWER","R6")
+416                                       ELSE
+417       P:019A P:019A 0AA420  HV_ON     BSET    #HVEN,X:PBD                       ; Make sure line is high to start with
+418       P:019B P:019B 06FF80            DO      #255,L_PON5                       ; The power conditioner board wants to
+                        00019D
+419       P:019D P:019D 0BA400            BCHG    #HVEN,X:PBD                       ;   see 128 H --> L transitions
+420                             L_PON5
+421                                       ENDIF
+422    
+423       P:019E P:019E 0D01C5            JSR     <PWR_DLY                          ; Delay for a little while
+424       P:019F P:019F 09F4B1            MOVEP             #1,Y:WR_MUX             ; Select high voltage MUX input
+                        000001
+425       P:01A1 P:01A1 44F400            MOVE              #30000,X0
+                        007530
+426       P:01A3 P:01A3 06C400            DO      X0,WT_HV                          ; Wait a few millisec for settling
+                        0001A5
+427       P:01A5 P:01A5 000000            NOP
+428                             WT_HV
+429       P:01A6 P:01A6 094431            MOVEP             Y:STR_ADC,X0            ; Start A/D conversion - dummy read
+430       P:01A7 P:01A7 066480            DO      #DLY_AD,L_PON6                    ; Wait for the A/D to settle
+                        0001A9
+431       P:01A9 P:01A9 448013            CLR     A         X:<CFFF,X0              ; Clear A, so put it in DO loop
+432                             L_PON6
+433       P:01AA P:01AA 094C32            MOVEP             Y:RD_ADC,A1             ; Get the A/D value
+434       P:01AB P:01AB 4C9F46            AND     X0,A                  Y:<T_HV,X0  ; A/D is only valid to 12 bits
+435    
+436                             ; Test that the voltage is in the range abs(initial - target) < margin
+437       P:01AC P:01AC 5C2544            SUB     X0,A                  A1,Y:<I_HV
+438       P:01AD P:01AD 4CA026            ABS     A                     Y:<K_HV,X0
+439       P:01AE P:01AE 200044            SUB     X0,A
+440       P:01AF P:01AF 0E71BE            JGT     <PERR                             ; Take corrective action
+441    
+442                             ; Command the timing board to turn on the analog board DC bias voltages
+443       P:01B0 P:01B0 568000            MOVE              X:<TIMING,A
+444       P:01B1 P:01B1 565B00            MOVE              A,X:(R3)+               ; Header from Utility to timing
+445       P:01B2 P:01B2 5EAF00            MOVE                          Y:<SBV,A
+446       P:01B3 P:01B3 565B00            MOVE              A,X:(R3)+               ; Set bias voltages
+447       P:01B4 P:01B4 74F400            MOVE              #PWR_ON3,N4             ; Set internal jump address after 'DON'
+                        0001B7
+448       P:01B6 P:01B6 0C0000            JMP     <XMT_CHK                          ; Send out commands to timing board
+449    
+450                             ; Reply with a DONE message to the host computer
+451       P:01B7 P:01B7 568000  PWR_ON3   MOVE              X:<HOST,A
+452       P:01B8 P:01B8 565B00            MOVE              A,X:(R3)+               ; Header to host
+453       P:01B9 P:01B9 568000            MOVE              X:<DON,A
+454       P:01BA P:01BA 565B00            MOVE              A,X:(R3)+               ; Power is now ON
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  utilappl.s  Page 9
+
+
+
+455       P:01BB P:01BB 08F4BF            MOVEP             #$2007,X:IPR            ; Enable TIMER interrupts
+                        002007
+456       P:01BD P:01BD 0C0000            JMP     <XMT_CHK                          ; Go transmit reply
+457    
+458                             ; Or, return with an error message
+459       P:01BE P:01BE 568000  PERR      MOVE              X:<HOST,A
+460       P:01BF P:01BF 565B00            MOVE              A,X:(R3)+               ; Header to host
+461       P:01C0 P:01C0 568000            MOVE              X:<ERR,A
+462       P:01C1 P:01C1 565B00            MOVE              A,X:(R3)+               ; Power is ON
+463       P:01C2 P:01C2 08F4BF            MOVEP             #$2007,X:IPR            ; Enable TIMER interrupts
+                        002007
+464       P:01C4 P:01C4 0C0000            JMP     <XMT_CHK                          ; Go transmit reply
+465    
+466                             ; Delay between power control board instructions
+467       P:01C5 P:01C5 06A08F  PWR_DLY   DO      #4000,L_DLY
+                        0001C7
+468       P:01C7 P:01C7 000000            NOP
+469                             L_DLY
+470       P:01C8 P:01C8 0AA403            BCLR    #SHUTTER,X:PBD                    ; Set Port B bit #3 to clos shutter
+471       P:01C9 P:01C9 0A0022            BSET    #ST_SH,X:<STATUS                  ; Set status to mean shutter closed
+472       P:01CA P:01CA 00000C            RTS
+473    
+474                             ; Start an exposure by first issuing a 'CLR' to the timing board
+475                             START_EX
+476    
+477       P:01CB P:01CB 568000            MOVE              X:<TIMING,A
+478       P:01CC P:01CC 565B00            MOVE              A,X:(R3)+               ; Header from Utility to timing
+479       P:01CD P:01CD 5EB200            MOVE                          Y:<NCL,A    ; Move no clear command into accumulator
+480       P:01CE P:01CE 565B00            MOVE              A,X:(R3)+               ; Setup the exposure without flushing the CCD
+481       P:01CF P:01CF 74F400            MOVE              #DONECLR,N4             ; Set internal jump address after 'DON'
+                        0001D2
+482       P:01D1 P:01D1 0C0000            JMP     <XMT_CHK                          ; Transmit these
+483    
+484                             ; Come to here after timing board has signaled that clearing is done
+485                             DONECLR
+486       P:01D2 P:01D2 0A0024            BSET    #STRT_EX,X:<STATUS
+487       P:01D3 P:01D3 0A0021            BSET    #ST_EX,X:<STATUS                  ; Exposure is in progress
+488       P:01D4 P:01D4 568000            MOVE              X:<HOST,A
+489       P:01D5 P:01D5 565B00            MOVE              A,X:(R3)+
+490       P:01D6 P:01D6 568000            MOVE              X:<DON,A
+491       P:01D7 P:01D7 565B00            MOVE              A,X:(R3)+
+492       P:01D8 P:01D8 0C0000            JMP     <XMT_CHK                          ; Issue a 'DON' - exposure has begun
+493    
+494       P:01D9 P:01D9 0A0001  PAUSE     BCLR    #ST_EX,X:<STATUS                  ; Take out of exposing mode
+495       P:01DA P:01DA 0B00A0            JSSET   #OPT_SH,X:<OPTIONS,CSHUT          ; Close shutter if needed
+                        00014D
+496       P:01DC P:01DC 0C0000            JMP     <FINISH                           ; Issue 'DON' and get next command
+497    
+498       P:01DD P:01DD 0A0021  RESUME    BSET    #ST_EX,X:<STATUS                  ; Put in exposing mode
+499       P:01DE P:01DE 0B00A0            JSSET   #OPT_SH,X:<OPTIONS,OSHUT          ; Open shutter if needed
+                        00014A
+500       P:01E0 P:01E0 0C0000            JMP     <FINISH                           ; Issue 'DON' and get next command
+501    
+502       P:01E1 P:01E1 0D014D  ABORT     JSR     <CSHUT                            ; To be sure
+503       P:01E2 P:01E2 0A0001            BCLR    #ST_EX,X:<STATUS                  ; Take out of exposing mode
+504       P:01E3 P:01E3 0A0008            BCLR    #CONT_EX,X:<STATUS                ; Take out of continuous exposing mode
+505       P:01E4 P:01E4 568000            MOVE              X:<TIMING,A
+506       P:01E5 P:01E5 565B00            MOVE              A,X:(R3)+               ; Header from Utility to timing
+507       P:01E6 P:01E6 5EA900            MOVE                          Y:<RDC,A
+508       P:01E7 P:01E7 565B00            MOVE              A,X:(R3)+               ; Read out the last frame
+509       P:01E8 P:01E8 0C0000            JMP     <FINISH                           ; Issue 'DON' and get next command
+510    
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  utilappl.s  Page 10
+
+
+
+511                             ; A 'DON' reply has been received in response to a command issued by
+512                             ;    the Utility board. Read the X:STATUS bits in responding to it.
+513    
+514                             ; Test if an internal program jump is needed after receiving a 'DON' reply
+515       P:01E9 P:01E9 239000  PR_DONE   MOVE              N4,R0                   ; Get internal jump address
+516       P:01EA P:01EA 3C0000            MOVE              #<START,N4              ; Set internal jump address to default
+517       P:01EB P:01EB 0AE080            JMP     (R0)                              ; Jump to the internal jump address
+518    
+519                             ; Check for program overflow - its hard to overflow since this application
+520                             ;   can be very large indeed
+521                                       IF      @CVS(N,*)>APL_XY
+523                                       ENDIF                                     ;  will not be overwritten
+524    
+525                             ; Command table resident in X: data memory
+526                             ;  The last part of the command table is not defined for "bootrom"
+527                             ;     because it contains application-specific commands
+528    
+529                                       IF      @SCP("HOST","HOST")
+530       X:00C0 X:00C0                   ORG     X:COM_TBL,X:COM_TBL
+531                                       ELSE                                      ; Memory offsets for generating EEPROMs
+533                                       ENDIF
+534       X:00C0 X:00C0                   DC      'PON',PWR_ON                      ; Power ON
+535       X:00C2 X:00C2                   DC      'POF',PWR_OFF                     ; Power OFF
+536       X:00C4 X:00C4                   DC      'SEX',START_EX                    ; Start exposure
+537       X:00C6 X:00C6                   DC      'PEX',PAUSE                       ; Pause exposure
+538       X:00C8 X:00C8                   DC      'REX',RESUME                      ; Resume exposure
+539       X:00CA X:00CA                   DC      'AEX',ABORT                       ; Abort exposure
+540       X:00CC X:00CC                   DC      'OSH',OPEN                        ; Open shutter
+541       X:00CE X:00CE                   DC      'CSH',CLOSE                       ; Close shutter
+542       X:00D0 X:00D0                   DC      'DON',PR_DONE                     ; Process DON reply
+543       X:00D2 X:00D2                   DC      0,START,0,START,0,START,0,START
+544       X:00DA X:00DA                   DC      0,START,0,START,0,START
+545    
+546                             ; Y: parameter table definitions, containing no "bootrom" definitions
+547                                       IF      @SCP("HOST","HOST")
+548       Y:0000 Y:0000                   ORG     Y:0,Y:0                           ; Download address
+549                                       ELSE
+551                                       ENDIF
+552       Y:0000 Y:0000         DIG_IN    DC      0                                 ; Values of 16 digital input lines
+553       Y:0001 Y:0001         DIG_OUT   DC      0                                 ; Values of 16 digital output lines
+554                             ;DAC0    DC      0       ; Table of four DAC values to be output
+555                             ;DAC1    DC      1000
+556       Y:0002 Y:0002         DAC0      DC      0000                              ; Table of four DAC values to be output
+557       Y:0003 Y:0003         DAC1      DC      0000
+558       Y:0004 Y:0004         DAC2      DC      0000
+559       Y:0005 Y:0005         DAC3      DC      0000
+560       Y:0006 Y:0006         NUM_AD    DC      16                                ; Number of inputs to A/D converter
+561       Y:0007 Y:0007         AD_IN     DC      0,0,0,0,0,0,0,0
+562       Y:000F Y:000F                   DC      0,0,0,0,0,0,0,0                   ; Table of 16 A/D values
+563                              EL_TIM_MSECONDS
+564       Y:0017 Y:0017                   DC      0                                 ; Number of milliseconds elapsed
+565       Y:0018 Y:0018         TGT_TIM   DC      6000                              ; Number of milliseconds desired in exposure
+566       Y:0019 Y:0019         U_CCDT    DC      $C20                              ; Upper range of CCD temperature control loop
+567       Y:001A Y:001A         L_CCDT    DC      $C50                              ; Lower range of CCD temperature control loop
+568       Y:001B Y:001B         K_CCDT    DC      85                                ; Constant of proportionality for CCDT control
+569       00000C                A_CCDT    EQU     AD_IN+5                           ; Address of CCD temperature in A/D table
+570       00000D                B_CCDT    EQU     AD_IN+6                           ; Address of Cold Head temperature in A/D table
+571       00000E                EXT_TMP   EQU     AD_IN+7                           ; Address of the External temperature in A/D tab
+le
+572       Y:001C Y:001C         T_CCDT    DC      $C00                              ; Target CCD T for small increment algorithmn
+573       Y:001D Y:001D         T_COEFF   DC      $70                               ; Coefficient for difference in temperatures
+574       Y:001E Y:001E         DAC0_LS   DC      0                                 ; Least significant part of heater voltage
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  utilappl.s  Page 11
+
+
+
+575    
+576    
+577                             ; Define power supply turn-on variables
+578                                       IF      @SCP("POWER","R6")
+580                                       ELSE
+581       Y:001F Y:001F         T_HV      DC      $4D0                              ; Target HV supply voltage for Rev 2 or 3 boards
+582                                       ENDIF
+583       Y:0020 Y:0020         K_HV      DC      $080                              ; Tolerance of HV supply voltage
+584       Y:0021 Y:0021         T_P15     DC      $5C0                              ; Target +15 volts supply voltage
+585       Y:0022 Y:0022         K_P15     DC      $080                              ; Tolerance of +15 volts supply voltage
+586       Y:0023 Y:0023         T_M15     DC      $A40                              ; Target -15 volts supply voltage
+587       Y:0024 Y:0024         K_M15     DC      $080                              ; Tolerance of -15 volts supply voltage
+588       Y:0025 Y:0025         I_HV      DC      0                                 ; Initial value of HV
+589       Y:0026 Y:0026         I_P15     DC      0                                 ; Initial value of +15 volts
+590       Y:0027 Y:0027         I_M15     DC      0                                 ; Initial value of -15 volts
+591    
+592                             ; Define some command names
+593       Y:0028 Y:0028         CLR       DC      'CLR'                             ; Clear CCD
+594       Y:0029 Y:0029         RDC       DC      'RDC'                             ; Readout CCD
+595       Y:002A Y:002A         ABR       DC      'ABR'                             ; Abort readout
+596       Y:002B Y:002B         OSH       DC      'OSH'                             ; Open shutter connected to timing board
+597       Y:002C Y:002C         CSH       DC      'CSH'                             ; Close shutter connected to timing board
+598       Y:002D Y:002D         POK       DC      'POK'                             ; Message to host - power in OK
+599       Y:002E Y:002E         PER       DC      'PER'                             ; Message to host - ERROR in power up sequence
+600       Y:002F Y:002F         SBV       DC      'SBV'                             ; Message to timing - set bias voltages
+601       Y:0030 Y:0030         IDL       DC      'IDL'                             ; Message to timing - put camera in idle mode
+602       Y:0031 Y:0031         STP       DC      'STP'                             ; Message to timing - Stop idling
+603       Y:0032 Y:0032         NCL       DC      'NCL'                             ; Message to timing - Don't clear the CCD before
+ an Exposure
+604       Y:0033 Y:0033         DTH       DC      'DTH'                             ; Message to Timing - Dither ccd charge
+605    
+606                             ; Miscellaneous
+607       Y:0034 Y:0034         CC00      DC      $C00                              ; Maximum heater voltage so the board doesn't bu
+rn up
+608                             ;CC00   DC      $000            ; Set different max
+609       Y:0035 Y:0035         SV_A1     DC      0                                 ; Save register A1 during analog processing
+610       Y:0036 Y:0036         SV_SR     DC      0                                 ; Save status register during timer processing
+611                              EL_TIM_FRACTION
+612       Y:0037 Y:0037                   DC      0                                 ; Fraction of a millisecond of elapsed exposure 
+time
+613       Y:0038 Y:0038         INCR      DC      $CCCCCC                           ; Exposure time increment = 0.8 milliseconds
+614       Y:0039 Y:0039         SH_DEL    DC      0                                 ; Shutter closing time.  No shutter in kepler sy
+stem
+615       Y:003A Y:003A         TEMP      DC      0                                 ; Temporary storage location for X:PBD word
+616       Y:003B Y:003B         DAC1_LS   DC      0                                 ; Least significant part of heater voltage
+617       Y:003C Y:003C         TGT_PIC   DC      1                                 ; Target number of pix in series.  Set by bashin
+g
+618       Y:003D Y:003D         NUMPIC    DC      0                                 ; Number of pix taken so far in this series
+619       Y:003E Y:003E         T_COUNT   DC      0                                 ; Number of temp samples this integration
+620       Y:003F Y:003F         T_SUM     DC      0                                 ; Running sum of temps
+621       Y:0040 Y:0040         T_AVG     DC      0                                 ; Average temp from last integration
+622       Y:0041 Y:0041         TH_COUNT  DC      0                                 ; Number of temp samples this integration
+623       Y:0042 Y:0042         TH_SUM    DC      0                                 ; Running sum of temps
+624       Y:0043 Y:0043         TH_AVG    DC      0                                 ; Average temp from last integration
+625       Y:0044 Y:0044         ONE_K     DC      1024                              ; Number of samples in the integration, pwr of 2
+626                             ; During the downloading of this application program the one millisecond
+627                             ;   timer interrupts are enabled, so the utility board will attempt to execute
+628                             ;   the partially downloaded TIMER routine, and crash. A workaround is to
+629                             ;   put a RTI as the first instruction of TIMER so it doesn't execute, then
+630                             ;   write the correct instruction only after all the rest of the application
+631                             ;   program has been downloaded. Here it is -
+632    
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  utilappl.s  Page 12
+
+
+
+633       P:0091 P:0091                   ORG     P:APL_ADR+1,P:APL_ADR+1
+634       P:0091 P:0091 053679  TIMER1    MOVEC                         SR,Y:<SV_SR ; Save Status Register
+635    
+636    
+637                                ENDSEC                                    ; End of SECTION UTILAPPL
+638    
+639                      ; End of program
+640                                END
+
+0    Errors
+0    Warnings
+
+

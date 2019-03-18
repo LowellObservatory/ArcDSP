@@ -1,0 +1,2024 @@
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  tim.s  Page 1
+
+
+
+1                        ; Source code for reading out an e2v CCD42-40 device for NASAcam
+2      
+3                                  PAGE    132                               ; Printronix page width - 132 columns
+4      
+5                        ; Define a section name so it doesn't conflict with other application programs
+6                                  SECTION TIM
+7      
+8                        ; Include a header file that defines global parameters
+9                                  INCLUDE "timhdr.s"
+10                              COMMENT *
+11     
+12                       This is a header file that is shared between the fiber optic timing board
+13                       boot and application code files
+14                               *
+15     
+16                                 PAGE    132                               ; Printronix page width - 132 columns
+17     
+18                       ; Some basic structural definitions
+19        000130         APL_ADR   EQU     $130                              ; P: memory location where application code begins
+20        0000D0         APL_LEN   EQU     $200-APL_ADR                      ; Maximum length of application program
+21        000280         MISC_LEN  EQU     $280                              ; Maximum length of "miscellanous" code
+22        000040         COM_LEN   EQU     $40                               ; Length of memory for application commands
+23        00003C         TIM_ISR   EQU     $3C                               ; DSP timer interrupt service routine address
+24        00003E         PGM_CON   EQU     $3E                               ; Program continues on here
+25        000080         COM_TBL   EQU     $80                               ; Starting address of command table in X: memory
+26        000500         N_W_APL   EQU     $500                              ; Number of words in each application
+27        000028         NUM_COM   EQU     40                                ; Number of entries in command table
+28     
+29        000000         RST_ISR   EQU     $00                               ; Hardware reset interrupt
+30        000006         ROM_ID    EQU     $06                               ; Location of program Identification = SWI interrupt
+31        000008         START     EQU     $08                               ; Starting address of program
+32        000060         RCV_BUF   EQU     $60                               ; Starting address of receiver buffer in X:
+33        00000F         TBL_ADR   EQU     $0F                               ; (IR) Waveform tables starting address
+34     
+35        004000         ROM_OFF   EQU     $4000                             ; Boot program offset address in EEPROM
+36        004200         LD_X      EQU     $4200                             ; Assembler loads X: starting at this EEPROM address
+37        00C600         RD_X      EQU     $C600                             ; DSP reads X: from this EEPROM address
+38     
+39                       ; Define DSP port addresses
+40        00FF80         WRSS      EQU     $FF80                             ; Write clock driver and VP switch states
+41        00FFC0         RDFO      EQU     $FFC0                             ; Read serial receiver fiber optic contents
+42        00FFC0         WRFO      EQU     $FFC0                             ; Write to fiber optic serial transmitter
+43        00FFA0         RDAD      EQU     $FFA0                             ; Read A/D datum into DSP
+44        00FFA0         RDAD0     EQU     $FFA0                             ; Address for reading A/D #0
+45        00FFA1         RDAD1     EQU     $FFA1                             ; Address for reading A/D #1
+46        00FFC1         WRLATCH   EQU     $FFC1                             ; Write to timing board latch
+47        006000         RSTWDT    EQU     $6000                             ; Address to reset the timing board watchdog timer
+48        00FFFE         BCR       EQU     $FFFE                             ; Bus (=Port A) Control Register -> Wait States
+49        00FFE0         PBC       EQU     $FFE0                             ; Port B Control Register
+50        00FFE2         PBDDR     EQU     $FFE2                             ; Port B Data Direction Register
+51        00FFE4         PBD       EQU     $FFE4                             ; Port B Data Register
+52        00FFE1         PCC       EQU     $FFE1                             ; Port C Control Register
+53        00FFE3         PCDDR     EQU     $FFE3                             ; PortC Data Direction Register
+54        00FFE5         PCD       EQU     $FFE5                             ; Port C Data Register
+55        00FFFF         IPR       EQU     $FFFF                             ; Interrupt Priority Register
+56        00FFEF         SSITX     EQU     $FFEF                             ; SSI Transmit and Receive data register
+57        00FFEF         SSIRX     EQU     $FFEF                             ; SSI Transmit and Receive data register
+58        00FFEE         SSISR     EQU     $FFEE                             ; SSI Status Register
+59        00FFEC         CRA       EQU     $FFEC                             ; SSI Control Register A
+60        00FFED         CRB       EQU     $FFED                             ; SSI Control Regsiter B
+61        00FFDE         TCSR      EQU     $FFDE                             ; Timer control and status register
+62        00FFDF         TCR       EQU     $FFDF                             ; Timer count register
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timhdr.s  Page 2
+
+
+
+63     
+64                       ; Hardware bit definitions all over the place
+65        000006         SSI_TDE   EQU     6                                 ; SSI Transmitter data register empty
+66        000007         SSI_RDF   EQU     7                                 ; SSI Receiver data register full
+67        000002         LVEN      EQU     2                                 ; Low voltage enable (+/-15 volt nominal)
+68        000003         HVEN      EQU     3                                 ; Enable high voltage (+32V nominal)
+69        000005         TIM_U_RST EQU     5                                 ; Timing to utility board reset bit number in U25
+70        00000D         PWRST     EQU     13                                ; Power control board reset
+71        000007         RST_FIFO  EQU     7                                 ; Reset FIFO bit number in control latch U25
+72        000009         EF        EQU     9                                 ; FIFO empty flag, low true
+73        000000         TIM_BIT   EQU     0                                 ; Timer status bit
+74        000001         WW        EQU     1                                 ; Word width = 1 for 16-bit image data, 0 for 24-bit
+75        000000         CDAC      EQU     0                                 ; Bit number in U25 for clearing DACs
+76        000002         ENCK      EQU     2                                 ; Bit number in U25 for enabling analog switches
+77        000001         DUALCLK   EQU     1                                 ; Set to clock two halves of clock driver board togethe
+r
+78     
+79                       ; Software status bits, defined at X:<STATUS = X:0
+80        000000         ST_RCV    EQU     0                                 ; Set if FO, cleared if SSI
+81        00000A         TST_IMG   EQU     10                                ; Set if controller is to generate a test image
+82        00000B         SHUT      EQU     11                                ; Set if opening shutter at beginning of exposure
+83     
+84                       ; Software status bits, defined at X:<STATUS = X:0
+85        000002         IDLMODE   EQU     2                                 ; Set if need to idle after readout
+86        000003         ST_SHUT   EQU     3                                 ; Set to indicate shutter is closed, clear for open
+87        000004         ST_RDC    EQU     4                                 ; Set if executing 'RDC' command - reading out
+88        000005         SPLIT_S   EQU     5                                 ; Set if split serial
+89        000006         SPLIT_P   EQU     6                                 ; Set if split parallel
+90        000007         MPP       EQU     7                                 ; Set if parallels are in MPP mode
+91     
+92                       ; Specify controller configuration bits of the X:STATUS word
+93                       ;   to describe the software capabilities of this application file
+94                       ; The bit is set (=1) if the capability is supported by the controller
+95     
+96     
+97                               COMMENT *
+98     
+99                       BIT #'s         FUNCTION
+100                      2,1,0           Video Processor
+101                                              000     CCD Rev. 3
+102                                              001     CCD Gen I
+103                                              010     IR Rev. 4
+104                                              011     IR Coadder
+105    
+106                      4,3             Timing Board
+107                                              00      Rev. 4, Gen II
+108                                              01      Gen I
+109    
+110                      6,5             Utility Board
+111                                              00      No utility board
+112                                              01      Utility Rev. 3
+113    
+114                      7               Shutter
+115                                              0       No shutter support
+116                                              1       Yes shutter support
+117    
+118                      9,8             Temperature readout
+119                                              00      No temperature readout
+120                                              01      Polynomial Diode calibration
+121                                              10      Linear temperature sensor calibration
+122    
+123                      10              Subarray readout
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timhdr.s  Page 3
+
+
+
+124                                              0       Not supported
+125                                              1       Yes supported
+126    
+127                      11              Binning
+128                                              0       Not supported
+129                                              1       Yes supported
+130    
+131                      12              Split-Serial readout
+132                                              0       Not supported
+133                                              1       Yes supported
+134    
+135                      13              Split-Parallel readout
+136                                              0       Not supported
+137                                              1       Yes supported
+138    
+139                      14              MPP = Inverted parallel clocks
+140                                              0       Not supported
+141                                              1       Yes supported
+142    
+143                      16,15           Clock Driver Board
+144                                              00      Rev. 3
+145                                              11      No clock driver board (Gen I)
+146    
+147                      19,18,17                Special implementations
+148                                              000     Somewhere else
+149                                              001     Mount Laguna Observatory
+150                                              010     NGST Aladdin
+151                                              xxx     Other
+152                              *
+153    
+154                      CCDVIDREV3B
+155       000000                   EQU     $000000                           ; CCD Video Processor Rev. 3
+156       000001         VIDGENI   EQU     $000001                           ; CCD Video Processor Gen I
+157       000002         IRREV4    EQU     $000002                           ; IR Video Processor Rev. 4
+158       000003         COADDER   EQU     $000003                           ; IR Coadder
+159       000000         TIMREV4   EQU     $000000                           ; Timing Rev. 4
+160       000008         TIMGENI   EQU     $000008                           ; Timing Gen I
+161       000020         UTILREV3  EQU     $000020                           ; Utility Rev. 3 supported
+162       000080         SHUTTER_CC EQU    $000080                           ; Shutter supported
+163       000100         TEMP_POLY EQU     $000100                           ; Polynomial calibration
+164                      TEMP_LINEAR
+165       000200                   EQU     $000200                           ; Linear calibration
+166       000400         SUBARRAY  EQU     $000400                           ; Subarray readout supported
+167       000800         BINNING   EQU     $000800                           ; Binning supported
+168                      SPLIT_SERIAL
+169       001000                   EQU     $001000                           ; Split serial supported
+170                      SPLIT_PARALLEL
+171       002000                   EQU     $002000                           ; Split parallel supported
+172       004000         MPP_CC    EQU     $004000                           ; Inverted clocks supported
+173       018000         CLKDRVGENI EQU    $018000                           ; No clock driver board - Gen I
+174       020000         MLO       EQU     $020000                           ; Set if Mount Laguna Observatory
+175       040000         NGST      EQU     $040000                           ; NGST Aladdin implementation
+176    
+177                      ; Define the application number and controller configuration bits
+178       000000         APL_NUM   EQU     0                                 ; Application number from 0 to 3
+179       002DA0         CC        EQU     CCDVIDREV3B+TIMREV4+UTILREV3+SHUTTER_CC+TEMP_POLY+SUBARRAY+BINNING+SPLIT_PARALLEL
+180    
+181                      ; Include miscellaneous timing commands
+182                                INCLUDE "timmisc.s"                       ; Custom
+183                      ; This file is for utilities that are in common to all the timing board
+184                      ;   programs, located starting at P:$200 in external SRAM
+185    
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timmisc.s  Page 4
+
+
+
+186    
+187                      ;  ****************  PROGRAM CODE IN SRAM PROGRAM SPACE    *******************
+188                      ; Put all the following code in SRAM, starting at P:$200.
+189                                IF      @SCP("HOST","HOST")
+190       P:0200 P:0200                   ORG     P:$200,P:$200                     ; Download address
+191                                       ELSE
+193                                       ENDIF
+194    
+195                             ; Select which readouts to process
+196                             ;   'SOS'  Amplifier_name
+197                             ;       Amplifier_name = '__L', '__R','_LR'
+198    
+199       P:0200 P:0200 44DC00  SEL_OS    MOVE              X:(R4)+,X0              ; Get amplifier(s) name
+200       P:0201 P:0201 4C0A00            MOVE                          X0,Y:<OS
+201       P:0202 P:0202 0D0204            JSR     <SELECT_OUTPUT_SOURCE
+202       P:0203 P:0203 0C0000            JMP     <FINISH1
+203    
+204                             ; A massive subroutine for setting all the addresses depending on the
+205                             ;   output source(s) selection.
+206                             SELECT_OUTPUT_SOURCE
+207    
+208                             ; Set all the waveform addresses depending on which readout mode
+209    
+210       P:0204 P:0204 56F400  CMP_L     MOVE              #'__L',A                ; Amplifier AL = readout #0
+                        5F5F4C
+211       P:0206 P:0206 200045            CMP     X0,A
+212       P:0207 P:0207 0E222B            JNE     <CMP_R
+213       P:0208 P:0208 56F400            MOVE              #SERIAL_SKIP_AL,A
+                        0000E0
+214       P:020A P:020A 5E7000            MOVE                          A,Y:SERIAL_SKIP
+                        00000C
+215       P:020C P:020C 56F400            MOVE              #SERIAL_READ_AL,A
+                        0000B0
+216       P:020E P:020E 5E7000            MOVE                          A,Y:SERIAL_READ
+                        00000D
+217       P:0210 P:0210 56F400            MOVE              #$00F000,A
+                        00F000
+218       P:0212 P:0212 5E7000            MOVE                          A,Y:SXMIT_AL
+                        0000B5
+219       P:0214 P:0214 5E7000            MOVE                          A,Y:SXMIT_VIDEO_PROCESS
+                        00006B
+220       P:0216 P:0216 56F400            MOVE              #SERIAL_CLOCK_AL,A
+                        00005C
+221       P:0218 P:0218 5E7000            MOVE                          A,Y:SERIAL_CLOCK
+                        00000E
+222       P:021A P:021A 56F400            MOVE              #(CLK2+S_DLY+000+S2R+000+S1L+000+000+000+000+000+000),A
+                        002011
+223       P:021C P:021C 5E7000            MOVE                          A,Y:CCLK_1
+                        00006F
+224       P:021E P:021E 56F400            MOVE              #(CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+000+000),A
+                        00201B
+225       P:0220 P:0220 5E7000            MOVE                          A,Y:CCLK_2
+                        000073
+226       P:0222 P:0222 56F400            MOVE              #PARALLEL_LOWER,A
+                        000100
+227       P:0224 P:0224 5E7000            MOVE                          A,Y:PARALLEL_CLOCK
+                        00000F
+228       P:0226 P:0226 0A7005            BCLR    #SPLIT_S,X:STATUS
+                        000000
+229       P:0228 P:0228 0A7006            BCLR    #SPLIT_P,X:STATUS
+                        000000
+230       P:022A P:022A 0C0279            JMP     <CMP_END
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timmisc.s  Page 5
+
+
+
+231    
+232       P:022B P:022B 56F400  CMP_R     MOVE              #'__R',A                ; Amplifier AR = readout #1
+                        5F5F52
+233       P:022D P:022D 200045            CMP     X0,A
+234       P:022E P:022E 0E2252            JNE     <CMP_LR
+235       P:022F P:022F 56F400            MOVE              #SERIAL_SKIP_AR,A
+                        0000F0
+236       P:0231 P:0231 5E7000            MOVE                          A,Y:SERIAL_SKIP
+                        00000C
+237       P:0233 P:0233 56F400            MOVE              #SERIAL_READ_AR,A
+                        0000A0
+238       P:0235 P:0235 5E7000            MOVE                          A,Y:SERIAL_READ
+                        00000D
+239       P:0237 P:0237 56F400            MOVE              #$00F021,A
+                        00F021
+240       P:0239 P:0239 5E7000            MOVE                          A,Y:SXMIT_VIDEO_PROCESS
+                        00006B
+241       P:023B P:023B 5E7000            MOVE                          A,Y:SXMIT_AR
+                        0000A5
+242       P:023D P:023D 56F400            MOVE              #SERIAL_CLOCK_AR,A
+                        000055
+243       P:023F P:023F 5E7000            MOVE                          A,Y:SERIAL_CLOCK
+                        00000E
+244       P:0241 P:0241 56F400            MOVE              #(CLK2+S_DLY+S1R+000+000+000+S2L+000+000+000+000+000),A
+                        00200A
+245       P:0243 P:0243 5E7000            MOVE                          A,Y:CCLK_1
+                        00006F
+246       P:0245 P:0245 56F400            MOVE              #(CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+000+000),A
+                        00201B
+247       P:0247 P:0247 5E7000            MOVE                          A,Y:CCLK_2
+                        000073
+248       P:0249 P:0249 56F400            MOVE              #PARALLEL_LOWER,A
+                        000100
+249       P:024B P:024B 5E7000            MOVE                          A,Y:PARALLEL_CLOCK
+                        00000F
+250       P:024D P:024D 0A7005            BCLR    #SPLIT_S,X:STATUS
+                        000000
+251       P:024F P:024F 0A7006            BCLR    #SPLIT_P,X:STATUS
+                        000000
+252       P:0251 P:0251 0C0279            JMP     <CMP_END
+253    
+254    
+255    
+256       P:0252 P:0252 56F400  CMP_LR    MOVE              #'_LR',A                ; Amplifiers AL and AR = readouts #0,1
+                        5F4C52
+257       P:0254 P:0254 200045            CMP     X0,A
+258       P:0255 P:0255 0E227C            JNE     <CMP_ERROR
+259       P:0256 P:0256 56F400            MOVE              #SERIAL_SKIP_CLOCKS,A
+                        0000D0
+260       P:0258 P:0258 5E7000            MOVE                          A,Y:SERIAL_SKIP
+                        00000C
+261       P:025A P:025A 56F400            MOVE              #SERIAL_READ_ALL,A
+                        0000C0
+262       P:025C P:025C 5E7000            MOVE                          A,Y:SERIAL_READ
+                        00000D
+263       P:025E P:025E 56F400            MOVE              #$00F020,A
+                        00F020
+264       P:0260 P:0260 5E7000            MOVE                          A,Y:SXMIT_ALL
+                        0000C5
+265       P:0262 P:0262 5E7000            MOVE                          A,Y:SXMIT_VIDEO_PROCESS
+                        00006B
+266       P:0264 P:0264 56F400            MOVE              #SERIAL_CLOCK_ALL,A
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timmisc.s  Page 6
+
+
+
+                        00004E
+267       P:0266 P:0266 5E7000            MOVE                          A,Y:SERIAL_CLOCK
+                        00000E
+268       P:0268 P:0268 56F400            MOVE              #(CLK2+S_DLY+S1R+000+000+S1L+000+000+000+000+000+000),A
+                        002009
+269       P:026A P:026A 5E7000            MOVE                          A,Y:CCLK_1
+                        00006F
+270       P:026C P:026C 56F400            MOVE              #(CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+000+000),A
+                        00201B
+271       P:026E P:026E 5E7000            MOVE                          A,Y:CCLK_2
+                        000073
+272       P:0270 P:0270 56F400            MOVE              #PARALLEL_LOWER,A
+                        000100
+273       P:0272 P:0272 5E7000            MOVE                          A,Y:PARALLEL_CLOCK
+                        00000F
+274       P:0274 P:0274 0A7006            BCLR    #SPLIT_P,X:STATUS
+                        000000
+275       P:0276 P:0276 0A7025            BSET    #SPLIT_S,X:STATUS
+                        000000
+276       P:0278 P:0278 0C0279            JMP     <CMP_END
+277    
+278    
+279       P:0279 P:0279 44F400  CMP_END   MOVE              #'DON',X0
+                        444F4E
+280       P:027B P:027B 00000C            RTS
+281    
+282                             CMP_ERROR
+283       P:027C P:027C 44F400            MOVE              #'ERR',X0
+                        455252
+284       P:027E P:027E 00000C            RTS
+285    
+286                             ; Fast clear of CCD, executed as a command
+287       P:027F P:027F 0D0281  CLEAR     JSR     <CLR_CCD
+288       P:0280 P:0280 0C0000            JMP     <FINISH
+289    
+290                             ; Fast clear image before each exposure, executed as a subroutine
+291       P:0281 P:0281 4C8400  CLR_CCD   MOVE                          Y:<NPCLR,X0
+292       P:0282 P:0282 06C400            DO      X0,LPCLR                          ; Loop over number of lines in image
+                        000287
+293       P:0284 P:0284 68F000            MOVE                          Y:PARALLEL_CLEAR,R0 ; Address of parallel transfer waveform
+                        000010
+294       P:0286 P:0286 0D01DE            JSR     <CLOCK
+295       P:0287 P:0287 000000            NOP
+296                             LPCLR
+297       P:0288 P:0288 060340            DO      Y:<NS_CLR,LSCLR1
+                        00028C
+298       P:028A P:028A 306300            MOVE              #<SERIAL_CLEAR,R0
+299       P:028B P:028B 0D01DE            JSR     <CLOCK
+300       P:028C P:028C 000000            NOP
+301                             LSCLR1
+302       P:028D P:028D 44F400            MOVE              #TST_RCV,X0             ; Wait for commands during exposure
+                        000000
+303       P:028F P:028F 440000            MOVE              X0,X:<IDL_ADR           ;  instead of idling
+304       P:0290 P:0290 00000C            RTS
+305    
+306                             ; Keep the CCD idling when not reading out
+307       P:0291 P:0291 060140  IDLE      DO      Y:<NSR,IDL1                       ; Loop over number of pixels per line
+                        00029A
+308       P:0293 P:0293 60F400            MOVE              #SERIAL_IDLE,R0         ; Serial transfer on pixel
+                        00003C
+309       P:0295 P:0295 0D01DE            JSR     <CLOCK                            ; Go to it
+310       P:0296 P:0296 0D0000            JSR     <GET_RCV                          ; Check for FO or SSI commands
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timmisc.s  Page 7
+
+
+
+311       P:0297 P:0297 0E029A            JCC     <NO_COM                           ; Continue IDLE if no commands received
+312       P:0298 P:0298 00008C            ENDDO                                     ; Cancel the DO loop system stack numbers
+313       P:0299 P:0299 0C0000            JMP     <CHK_SSI                          ; Go process header and command
+314       P:029A P:029A 000000  NO_COM    NOP
+315                             IDL1
+316       P:029B P:029B 68F000            MOVE                          Y:PARALLEL_CLEAR,R0 ; Address of parallel clocking waveform
+                        000010
+317       P:029D P:029D 0D01DE            JSR     <CLOCK                            ; Go clock out the CCD charge
+318       P:029E P:029E 0C0291            JMP     <IDLE
+319    
+320                             ; Calculate the fast read parameters for each readout box
+321                             SETUP_SUBROUTINE
+322       P:029F P:029F 44F400            MOVE              #(END_SERIAL_READ_ALL-SERIAL_READ_ALL),X0 ; # of waveforms
+                        00000E
+323       P:02A1 P:02A1 4D9100            MOVE                          Y:<NSERIALS_READ,X1 ; Number of pixels to read
+324       P:02A2 P:02A2 0D02D0            JSR     <FASTSKP                          ; Compute number of clocks required
+325       P:02A3 P:02A3 4D1400            MOVE                          X1,Y:<NREAD ; Number of waveforms per line
+326       P:02A4 P:02A4 5E9B00            MOVE                          Y:<NR_BIAS,A ; Number of pixels to read
+327       P:02A5 P:02A5 0A0085            JCLR    #SPLIT_S,X:STATUS,*+3             ; Split serials require / 2
+                        0002A8
+328       P:02A7 P:02A7 200022            ASR     A
+329       P:02A8 P:02A8 21C500            MOVE              A,X1                    ; Number of waveforms per line
+330       P:02A9 P:02A9 0D02D0            JSR     <FASTSKP                          ; Compute number of clocks required
+331       P:02AA P:02AA 4D1600            MOVE                          X1,Y:<NBIAS ; Number of waveforms per line
+332       P:02AB P:02AB 44F400            MOVE              #(END_SERIAL_SKIP_CLOCKS-SERIAL_SKIP_CLOCKS),X0 ; # of waveforms
+                        000007
+333       P:02AD P:02AD 4D8300            MOVE                          Y:<NS_CLR,X1 ; Number of pixels to skip
+334       P:02AE P:02AE 0D02D0            JSR     <FASTSKP                          ; Compute number of clocks required
+335       P:02AF P:02AF 4D1200            MOVE                          X1,Y:<NSCLR ; Number of waveforms per line
+336       P:02B0 P:02B0 4D9800            MOVE                          Y:<NS_SKP1,X1 ; Number of pixels to skip
+337       P:02B1 P:02B1 4F8500            MOVE                          Y:<NSBIN,Y1 ; Adjust for binning
+338       P:02B2 P:02B2 2000F0            MPY     Y1,X1,A
+339       P:02B3 P:02B3 200022            ASR     A
+340       P:02B4 P:02B4 210500            MOVE              A0,X1
+341       P:02B5 P:02B5 0D02D0            JSR     <FASTSKP                          ; Compute number of clocks required
+342       P:02B6 P:02B6 4D1300            MOVE                          X1,Y:<NSKIP1 ; Number of waveforms per line
+343       P:02B7 P:02B7 4D9900            MOVE                          Y:<NS_SKP2,X1 ; Number of pixels to skip
+344       P:02B8 P:02B8 4F8500            MOVE                          Y:<NSBIN,Y1 ; Adjust for binning
+345       P:02B9 P:02B9 2000F0            MPY     Y1,X1,A
+346       P:02BA P:02BA 200022            ASR     A
+347       P:02BB P:02BB 210500            MOVE              A0,X1
+348       P:02BC P:02BC 0D02D0            JSR     <FASTSKP                          ; Compute number of clocks required
+349       P:02BD P:02BD 4D1500            MOVE                          X1,Y:<NSKIP2 ; Number of waveforms per line
+350       P:02BE P:02BE 4D9700            MOVE                          Y:<NP_SKIP,X1
+351       P:02BF P:02BF 4F8600            MOVE                          Y:<NPBIN,Y1
+352       P:02C0 P:02C0 2000F0            MPY     X1,Y1,A
+353       P:02C1 P:02C1 200022            ASR     A
+354       P:02C2 P:02C2 581700            MOVE                          A0,Y:<NP_SKIP
+355       P:02C3 P:02C3 00000C            RTS
+356                                       INCLUDE "timCCDmisc.s"                    ; Generic
+357                             ; This file is for utilities that are in common to all the timing board
+358                             ;   programs, located starting at P:$200 in external SRAM
+359    
+360                                     COMMENT *
+361    
+362                             The following commands are supported in this "timmisc.asm" file
+363                             PAL_DLY                 Subroutine to delay by about 8 microseconds
+364                             SET_DAC                 Transfer DAC values in (R0) table to the DACs
+365                             FASTSKP                 Compute number of waveform table entries in a readout
+366                                                             for fast clocking
+367                             SYNTHETIC_IMAGE         Generate a synthetic image for system testing
+368                             OSHUT                   Subroutine call for opening the shutter
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timCCDmisc.s  Page 8
+
+
+
+369                             CSHUT                   Subroutine call for closing the shutter
+370                             OPEN_SHUTTER            Command for opening the shutter
+371                             CLOSE_SHUTTER           Command for closing the shutter
+372                             SET_EXP_TIME            Write desired exposure time to timing board variable
+373                             RD_EXP_TIME             Read elapsed exposure time
+374                             START_EXPOSURE          Start an exposure - 'DON' reply, clear FPA, open
+375                                                     shutter, expose, close shutter, delay Y:SH_DLY, readout
+376                             PAUSE_EXPOSURE          Close shutter, stop exposure timer
+377                             RESUME_EXPOSURE         Open shutter if necessary, resume exposure timer
+378                             ABORT_EXPOSURE          Close shutter, stop exposure timer
+379                             IDL                     Put FPA to clocking when not processing commands or
+380                                                     reading out
+381                             STP                     Put FPA to not clocking when not processing commands or
+382                                                     reading out
+383                             READ_CONTROLLER_CONFIGURATION
+384    
+385                             PWR_OFF                 Turn off ananlog power supply voltages to backplane
+386                             PWR_ON                  Turn on analog power supply voltages to backplane
+387                             SETBIAS                 Command to call SET_BIASES and reply 'DON'
+388                             SET_BIASES              Subroutine to turn on all bias and clock voltages
+389                                                     by reading them from the waveform tables and writing
+390                                                     them to the DACs
+391                             SER_ANA                 Direct the timing board DSP's synchronous serial
+392                                                     transmitter to the analog boards (clock driver, video)
+393                             SER_UTL                 Direct the timing board DSP's synchronous serial
+394                                                     transmitter to the utility board
+395                             CLR_SWS                 Clear the analog switches in the clock driver and
+396                                                     video boards to lower their power consumption, as a
+397                                                     command with a 'DON' reply
+398                             CLEAR_SWITCHES          A subroutine call for CLR_WSW
+399                             ST_GAIN                 Set the video processor gain to one of four values
+400                             WR_CNTRL
+401                             SET_DC
+402                             SET_BIAS_NUMBER
+403                             SET_MUX
+404    
+405                                     *
+406    
+407                             ;  ** Place this file after the custom timmisc.asm file so it continues
+408                             ;       to be written in the P:$200 address space  ****
+409    
+410                             ; Hardware control bit definitions
+411       000004                SHUTTER   EQU     4                                 ; Shutter control bit = TIM-LATCH0, A30
+412    
+413    
+414                             ; Delay for serial writes to the PALs and DACs by 8 microsec
+415       P:02C4 P:02C4 06FA80  PAL_DLY   DO      #250,DLY                          ; Wait 8 usec for serial data transmission
+                        0002C6
+416       P:02C6 P:02C6 000000            NOP
+417       P:02C7 P:02C7 000000  DLY       NOP
+418       P:02C8 P:02C8 00000C            RTS
+419    
+420                             ;  Update the DACs
+421       P:02C9 P:02C9 4CD800  SET_DAC   MOVE                          Y:(R0)+,X0  ; Get the number of table entries
+422       P:02CA P:02CA 06C400            DO      X0,SET_L0                         ; Repeat X0 times
+                        0002CE
+423       P:02CC P:02CC 08D8EF            MOVEP             Y:(R0)+,X:SSITX         ; Send out the waveform
+424       P:02CD P:02CD 0D02C4            JSR     <PAL_DLY                          ; Wait for SSI and PAL to be empty
+425       P:02CE P:02CE 000000            NOP                                       ; Do loop restriction
+426                             SET_L0
+427       P:02CF P:02CF 00000C            RTS                                       ; Return from subroutine
+428    
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timCCDmisc.s  Page 9
+
+
+
+429                             ; Subroutine for computing number of fast clocks needed
+430       P:02D0 P:02D0 2000A8  FASTSKP   MPY     X0,X1,B                           ; X1 = number of pixels to skip,
+431                                                                                 ; X0 = number of waveform table entries
+432       P:02D1 P:02D1 20002A            ASR     B                                 ; Correct for multiplication left shift
+433       P:02D2 P:02D2 212E00            MOVE              B0,A                    ; Get only least significant 24 bits
+434       P:02D3 P:02D3 458000            MOVE              X:<ONE,X1
+435       P:02D4 P:02D4 200064            SUB     X1,A                              ; Subtract 1
+436       P:02D5 P:02D5 21C500            MOVE              A,X1                    ; X1 = X0 * X1 - 1
+437       P:02D6 P:02D6 00000C            RTS
+438    
+439                             ; Generate a synthetic image by simply incrementing the pixel counts
+440                             SYNTHETIC_IMAGE
+441       P:02D7 P:02D7 200013            CLR     A
+442       P:02D8 P:02D8 5E0700            MOVE                          A,Y:<TST_DAT
+443       P:02D9 P:02D9 060240            DO      Y:<NPR,LPR_TST                    ; Loop over each line readout
+                        0002E4
+444       P:02DB P:02DB 060140            DO      Y:<NSR,LSR_TST                    ; Loop over number of pixels per line
+                        0002E3
+445       P:02DD P:02DD 0614A0            REP     #20                               ; #20 => 1.0 microsec per pixel
+446       P:02DE P:02DE 000000            NOP
+447    
+448                             ; Increment pixel counts by one
+449       P:02DF P:02DF 458000            MOVE              X:<ONE,X1
+450       P:02E0 P:02E0 5E8700            MOVE                          Y:<TST_DAT,A
+451       P:02E1 P:02E1 200060            ADD     X1,A                              ; Pixel data = Y:TST_DAT = Y:TST_DAT + 1
+452       P:02E2 P:02E2 5E0700            MOVE                          A,Y:<TST_DAT
+453       P:02E3 P:02E3 09CE00            MOVEP             A,Y:WRFO                ; Transmit to fiber optic
+454                             LSR_TST
+455       P:02E4 P:02E4 000000            NOP
+456                             LPR_TST
+457       P:02E5 P:02E5 0C01D6            JMP     <RDC_END                          ; Normal exit
+458    
+459                             ; Open the shutter by setting the backplane bit TIM-LATCH0
+460       P:02E6 P:02E6 0A0023  OSHUT     BSET    #ST_SHUT,X:<STATUS                ; Set status bit to mean shutter open
+461       P:02E7 P:02E7 0A0024            BSET    #SHUTTER,X:<LATCH                 ; Clear hardware shutter bit to open
+462       P:02E8 P:02E8 09F081            MOVEP             X:LATCH,Y:WRLATCH       ; Write it to the hardware
+                        000000
+463       P:02EA P:02EA 00000C            RTS
+464    
+465                             ; Close the shutter by clearing the backplane bit TIM-LATCH0
+466       P:02EB P:02EB 0A0003  CSHUT     BCLR    #ST_SHUT,X:<STATUS                ; Clear status to mean shutter closed
+467       P:02EC P:02EC 0A0004            BCLR    #SHUTTER,X:<LATCH                 ; Set hardware shutter bit to close
+468       P:02ED P:02ED 09F081            MOVEP             X:LATCH,Y:WRLATCH       ; Write it to the hardware
+                        000000
+469       P:02EF P:02EF 00000C            RTS
+470    
+471                             ; Open the shutter from the timing board, executed as a command
+472                             OPEN_SHUTTER
+473       P:02F0 P:02F0 0D02E6            JSR     <OSHUT
+474       P:02F1 P:02F1 0C0000            JMP     <FINISH
+475    
+476                             ; Close the shutter from the timing board, executed as a command
+477                             CLOSE_SHUTTER
+478       P:02F2 P:02F2 0D02EB            JSR     <CSHUT
+479       P:02F3 P:02F3 0C0000            JMP     <FINISH
+480    
+481                             ; Set the desired exposure time
+482                             SET_EXP_TIME
+483       P:02F4 P:02F4 44DC00            MOVE              X:(R4)+,X0
+484       P:02F5 P:02F5 440000            MOVE              X0,X:<EXP_TIM           ; Write to magic address
+485       P:02F6 P:02F6 440000            MOVE              X0,X:<TGT_TIM
+486       P:02F7 P:02F7 0C0000            JMP     <FINISH
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timCCDmisc.s  Page 10
+
+
+
+487    
+488                             ; Read the time remaining until the exposure ends
+489                             RD_EXP_TIME
+490       P:02F8 P:02F8 448000            MOVE              X:<EL_TIM,X0            ; Read elapsed exposure time
+491       P:02F9 P:02F9 0C0000            JMP     <FINISH1
+492    
+493                             ; Start the exposure, operate the shutter, and initiate CCD readout
+494                             START_EXPOSURE
+495       P:02FA P:02FA 44F400            MOVE              #$020102,X0
+                        020102
+496       P:02FC P:02FC 0D048B            JSR     <XMT_FO
+497       P:02FD P:02FD 44F400            MOVE              #'IIA',X0
+                        494941
+498       P:02FF P:02FF 0D048B            JSR     <XMT_FO
+499       P:0300 P:0300 0D0281            JSR     <CLR_CCD                          ; Clear out the CCD
+500       P:0301 P:0301 0A008B            JCLR    #SHUT,X:STATUS,L_SEX0
+                        000304
+501       P:0303 P:0303 0D02E6            JSR     <OSHUT                            ; Open the shutter
+502       P:0304 P:0304 67F400  L_SEX0    MOVE              #L_SEX1,R7
+                        000307
+503       P:0306 P:0306 0C0000            JMP     <EXPOSE                           ; Delay for specified exposure time
+504                             L_SEX1
+505       P:0307 P:0307 0A008B            JCLR    #SHUT,X:STATUS,S_DEL0             ; Close the shutter if necessary
+                        000315
+506       P:0309 P:0309 0D02EB            JSR     <CSHUT                            ; Close the shutter
+507       P:030A P:030A 5E8800            MOVE                          Y:<SH_DEL,A
+508       P:030B P:030B 200003            TST     A
+509       P:030C P:030C 0EF315            JLE     <S_DEL0
+510       P:030D P:030D 44F400            MOVE              #25000,X0
+                        0061A8
+511       P:030F P:030F 06CE00            DO      A,S_DEL0                          ; Delay by Y:SH_DEL milliseconds
+                        000314
+512       P:0311 P:0311 06C400            DO      X0,S_DEL1
+                        000313
+513       P:0313 P:0313 000000            NOP
+514       P:0314 P:0314 000000  S_DEL1    NOP
+515       P:0315 P:0315 000000  S_DEL0    NOP
+516       P:0316 P:0316 0C0130            JMP     <RDCCD                            ; Finally, read out the CCD
+517    
+518                             ; Pause the exposure - close the shutter, and stop the timer
+519                             PAUSE_EXPOSURE
+520       P:0317 P:0317 0A9E00            BCLR    #TIM_BIT,X:TCSR                   ; Disable the DSP exposure timer
+521       P:0318 P:0318 0D02EB            JSR     <CSHUT                            ; Close the shutter
+522       P:0319 P:0319 0C0000            JMP     <FINISH
+523    
+524                             ; Resume the exposure - open the shutter if needed and restart the timer
+525                             RESUME_EXPOSURE
+526       P:031A P:031A 0A9E20            BSET    #TIM_BIT,X:TCSR                   ; Re-enable the DSP exposure timer
+527       P:031B P:031B 0A008B            JCLR    #SHUT,X:STATUS,L_RES
+                        00031E
+528       P:031D P:031D 0D02E6            JSR     <OSHUT                            ; Open the shutter ir necessary
+529       P:031E P:031E 0C0000  L_RES     JMP     <FINISH
+530    
+531                             ; Abort exposure - close the shutter, stop the timer and resume idle mode
+532                             ABORT_EXPOSURE
+533       P:031F P:031F 0A9E00            BCLR    #TIM_BIT,X:TCSR                   ; Disable the DSP exposure timer
+534       P:0320 P:0320 0D02EB            JSR     <CSHUT                            ; Close the shutter
+535       P:0321 P:0321 0A0082            JCLR    #IDLMODE,X:<STATUS,FINISH         ; Check whether to idle after readout
+                        000000
+536       P:0323 P:0323 44F400            MOVE              #IDLE,X0                ; Idle after readout
+                        000291
+537       P:0325 P:0325 440000            MOVE              X0,X:<IDL_ADR
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timCCDmisc.s  Page 11
+
+
+
+538       P:0326 P:0326 0C0000            JMP     <FINISH
+539    
+540                             ; Set software to IDLE mode
+541       P:0327 P:0327 44F400  IDL       MOVE              #IDLE,X0                ; Exercise clocks when idling
+                        000291
+542       P:0329 P:0329 440000            MOVE              X0,X:<IDL_ADR
+543       P:032A P:032A 0A0022            BSET    #IDLMODE,X:<STATUS                ; Idle after readout
+544       P:032B P:032B 0C0000            JMP     <FINISH                           ; Need to send header and 'DON'
+545    
+546                             ; Come to here on a 'STP' command so 'DON' can be sent
+547       P:032C P:032C 44F400  STP       MOVE              #TST_RCV,X0             ; Wait for commands during exposure
+                        000000
+548       P:032E P:032E 440000            MOVE              X0,X:<IDL_ADR           ;  instead of exercising clocks
+549       P:032F P:032F 0A0002            BCLR    #IDLMODE,X:<STATUS                ; Don't idle after readout
+550       P:0330 P:0330 0C0000            JMP     <FINISH
+551    
+552                             ; Let the host computer read the controller configuration
+553                             READ_CONTROLLER_CONFIGURATION
+554       P:0331 P:0331 4C8900            MOVE                          Y:<CONFIG,X0 ; Just transmit the configuration
+555       P:0332 P:0332 0C0000            JMP     <FINISH1
+556    
+557                             ; Power off
+558       P:0333 P:0333 0D0383  PWR_OFF   JSR     <CLEAR_SWITCHES                   ; Clear all analog switches
+559       P:0334 P:0334 0AA202            BCLR    #LVEN,X:PBDDR                     ; Set these signals to DSP inputs
+560       P:0335 P:0335 0AA20D            BCLR    #PWRST,X:PBDDR
+561       P:0336 P:0336 0AA203            BCLR    #HVEN,X:PBDDR
+562       P:0337 P:0337 0AA422            BSET    #LVEN,X:PBD                       ; LVEN = HVEN = 1 => Power reset
+563       P:0338 P:0338 0AA42D            BSET    #PWRST,X:PBD
+564       P:0339 P:0339 0AA423            BSET    #HVEN,X:PBD
+565       P:033A P:033A 0C0000            JMP     <FINISH
+566    
+567                             ; Start power-on cycle
+568       P:033B P:033B 0AA222  PWR_ON    BSET    #LVEN,X:PBDDR                     ; Set these signals to DSP outputs
+569       P:033C P:033C 0AA22D            BSET    #PWRST,X:PBDDR
+570       P:033D P:033D 0AA223            BSET    #HVEN,X:PBDDR
+571       P:033E P:033E 0D0383            JSR     <CLEAR_SWITCHES                   ; Clear all analog switches
+572    
+573                             ; Ramp up the low voltages (+/- 6.5V, 16.5V) and then delay
+574       P:033F P:033F 0AA402            BCLR    #LVEN,X:PBD                       ; LVEN = Low => Turn on +/- 6.5V,
+575       P:0340 P:0340 0AA40D            BCLR    #PWRST,X:PBD
+576       P:0341 P:0341 44F400            MOVE              #60000,X0
+                        00EA60
+577       P:0343 P:0343 06C400            DO      X0,WT_PON1                        ; Wait 10 millisec or so for settling
+                        000348
+578       P:0345 P:0345 07708E            MOVE              A,P:RSTWDT              ; Reset watchdog timer
+                        006000
+579       P:0347 P:0347 07708E            MOVE              A,P:RSTWDT
+                        006000
+580                             WT_PON1
+581    
+582                             ; Ramp up the high +36 volt power line and then delay
+583       P:0349 P:0349 0AA403            BCLR    #HVEN,X:PBD                       ; HVEN = Low => Turn on +36V
+584       P:034A P:034A 44F400            MOVE              #60000,X0
+                        00EA60
+585       P:034C P:034C 06C400            DO      X0,WT_PON2                        ; Wait 10 millisec or so for settling
+                        000351
+586       P:034E P:034E 07708E            MOVE              A,P:RSTWDT              ; Reset watchdog timer
+                        006000
+587       P:0350 P:0350 07708E            MOVE              A,P:RSTWDT
+                        006000
+588                             WT_PON2
+589       P:0352 P:0352 0D035A            JSR     <SET_BIASES                       ; Turn on the DC bias supplies
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timCCDmisc.s  Page 12
+
+
+
+590       P:0353 P:0353 44F400            MOVE              #IDLE,X0
+                        000291
+591       P:0355 P:0355 440000            MOVE              X0,X:<IDL_ADR
+592       P:0356 P:0356 0D02EB            JSR     <CSHUT
+593       P:0357 P:0357 0C0000            JMP     <FINISH                           ; All done with 'DON'
+594    
+595       P:0358 P:0358 0D035A  SETBIAS   JSR     <SET_BIASES
+596       P:0359 P:0359 0C0000            JMP     <FINISH
+597    
+598                             ; Set all the DC bias voltages and video processor offset values, reading
+599                             ;   them from the table labeled DACS in this file
+600                             SET_BIASES
+601       P:035A P:035A 0D0373            JSR     <SER_ANA
+602       P:035B P:035B 0A0020            BSET    #CDAC,X:<LATCH                    ; Disable clearing of DACs
+603       P:035C P:035C 0A0022            BSET    #ENCK,X:<LATCH                    ; Enable clock and DAC output switches
+604       P:035D P:035D 09F081            MOVEP             X:LATCH,Y:WRLATCH       ; Disable clear of DAC and enable clocks
+                        000000
+605       P:035F P:035F 0D02C4            JSR     <PAL_DLY                          ; Delay for all this to happen
+606       P:0360 P:0360 0D02C4            JSR     <PAL_DLY                          ; Delay for all this to happen
+607    
+608                             ; Disable simultaneous update of clock driver boards
+609       P:0361 P:0361 0A0001            BCLR    #1,X:<LATCH
+610       P:0362 P:0362 09F081            MOVEP             X:LATCH,Y:WRLATCH
+                        000000
+611    
+612                             ; Read DAC values from a table, and set DACs
+613       P:0364 P:0364 60F400            MOVE              #DACS,R0                ; Get starting address of DAC values
+                        000118
+614       P:0366 P:0366 0D02C9            JSR     <SET_DAC
+615    
+616                             ; Set all video processor analog switches to open to disable them (1 => OFF)
+617       P:0367 P:0367 56F400            MOVE              #$000FFF,A
+                        000FFF
+618       P:0369 P:0369 566600            MOVE              A,X:(R6)                ; Send out the waveform
+619       P:036A P:036A 000000            NOP
+620    
+621                             ; Let the DAC voltages all ramp up before exiting
+622       P:036B P:036B 56F400            MOVE              #400,A                  ; Delay 4 millisec
+                        000190
+623       P:036D P:036D 06CE00            DO      A,L_SBI1
+                        000370
+624       P:036F P:036F 0D02C4            JSR     <PAL_DLY                          ; Delay for all this to happen
+625       P:0370 P:0370 000000            NOP
+626                             L_SBI1
+627       P:0371 P:0371 0D037A            JSR     <SER_UTL                          ; SSI -> utility board communication
+628       P:0372 P:0372 00000C            RTS
+629    
+630                             ; Enable serial communication to the analog boards
+631       P:0373 P:0373 0AA420  SER_ANA   BSET    #0,X:PBD                          ; Set H0 for analog boards SSI
+632       P:0374 P:0374 08F4A1            MOVEP             #$0000,X:PCC            ; Software reset of SSI
+                        000000
+633       P:0376 P:0376 0AAD0A            BCLR    #10,X:CRB                         ; SSI -> continuous clock for analog
+634       P:0377 P:0377 08F4A1            MOVEP             #$0160,X:PCC            ; Re-enable the SSI
+                        000160
+635       P:0379 P:0379 00000C            RTS
+636    
+637                             ; Enable serial communication to the utility board
+638       P:037A P:037A 08F4A1  SER_UTL   MOVEP             #$0000,X:PCC            ; Software reset of SSI
+                        000000
+639       P:037C P:037C 0AAD2A            BSET    #10,X:CRB                         ; SSI -> gated clock for util board
+640       P:037D P:037D 08F4A1            MOVEP             #$0160,X:PCC            ; Enable the SSI
+                        000160
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timCCDmisc.s  Page 13
+
+
+
+641       P:037F P:037F 0AA400            BCLR    #0,X:PBD                          ; Clear H0 for utility board SSI
+642       P:0380 P:0380 00000C            RTS
+643    
+644       P:0381 P:0381 0D0383  CLR_SWS   JSR     <CLEAR_SWITCHES
+645       P:0382 P:0382 0C0000            JMP     <FINISH
+646    
+647                             ; Clear all video processor analog switches to lower their power dissipation
+648                             CLEAR_SWITCHES
+649       P:0383 P:0383 0D0373            JSR     <SER_ANA                          ; Set SSI to analog board communication
+650       P:0384 P:0384 56F400            MOVE              #$0C3000,A              ; Value of integrate speed and gain switches
+                        0C3000
+651       P:0386 P:0386 20001B            CLR     B
+652       P:0387 P:0387 241000            MOVE              #$100000,X0             ; Increment over board numbers for DAC writes
+653       P:0388 P:0388 45F400            MOVE              #$001000,X1             ; Increment over board numbers for WRSS writes
+                        001000
+654       P:038A P:038A 060F80            DO      #15,L_VIDEO                       ; Fifteen video processor boards maximum
+                        000391
+655       P:038C P:038C 08CE2F            MOVEP             A,X:SSITX               ; Gain, integrate speed
+656       P:038D P:038D 200040            ADD     X0,A
+657       P:038E P:038E 577000            MOVE              B,X:WRSS
+                        00FF80
+658       P:0390 P:0390 0D02C4            JSR     <PAL_DLY                          ; Delay for the serial data transmission
+659       P:0391 P:0391 200068            ADD     X1,B
+660                             L_VIDEO
+661       P:0392 P:0392 0A0000            BCLR    #CDAC,X:<LATCH                    ; Enable clearing of DACs
+662       P:0393 P:0393 0A0002            BCLR    #ENCK,X:<LATCH                    ; Disable clock and DAC output switches
+663       P:0394 P:0394 09F081            MOVEP             X:LATCH,Y:WRLATCH       ; Execute these two operations
+                        000000
+664       P:0396 P:0396 44F400            MOVE              #IDLE,X0
+                        000291
+665       P:0398 P:0398 440000            MOVE              X0,X:<IDL_ADR
+666       P:0399 P:0399 0D037A            JSR     <SER_UTL                          ; Return SSI to utility board
+667       P:039A P:039A 00000C            RTS
+668    
+669                             ; Set the video processor gain and integrator speed for all video boards
+670                             ;  Command syntax is  SGN  #GAIN  #SPEED, #GAIN = 1, 2, 5 or 10
+671                             ;                                         #SPEED = 0 for slow, 1 for fast
+672       P:039B P:039B 0D0373  ST_GAIN   JSR     <SER_ANA                          ; Set SSI to analog board communication
+673       P:039C P:039C 56DC00            MOVE              X:(R4)+,A               ; Gain value (1,2,5 or 10)
+674       P:039D P:039D 44F400            MOVE              #>1,X0
+                        000001
+675       P:039F P:039F 200045            CMP     X0,A                              ; Check for gain = x1
+676       P:03A0 P:03A0 0E23A4            JNE     <STG2
+677       P:03A1 P:03A1 57F400            MOVE              #>$77,B
+                        000077
+678       P:03A3 P:03A3 0C03B8            JMP     <STG_A
+679       P:03A4 P:03A4 44F400  STG2      MOVE              #>2,X0                  ; Check for gain = x2
+                        000002
+680       P:03A6 P:03A6 200045            CMP     X0,A
+681       P:03A7 P:03A7 0E23AB            JNE     <STG5
+682       P:03A8 P:03A8 57F400            MOVE              #>$BB,B
+                        0000BB
+683       P:03AA P:03AA 0C03B8            JMP     <STG_A
+684       P:03AB P:03AB 44F400  STG5      MOVE              #>5,X0                  ; Check for gain = x5
+                        000005
+685       P:03AD P:03AD 200045            CMP     X0,A
+686       P:03AE P:03AE 0E23B2            JNE     <STG10
+687       P:03AF P:03AF 57F400            MOVE              #>$DD,B
+                        0000DD
+688       P:03B1 P:03B1 0C03B8            JMP     <STG_A
+689       P:03B2 P:03B2 44F400  STG10     MOVE              #>10,X0                 ; Check for gain = x10
+                        00000A
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timCCDmisc.s  Page 14
+
+
+
+690       P:03B4 P:03B4 200045            CMP     X0,A
+691       P:03B5 P:03B5 0E2000            JNE     <ERROR
+692       P:03B6 P:03B6 57F400            MOVE              #>$EE,B
+                        0000EE
+693    
+694       P:03B8 P:03B8 56DC00  STG_A     MOVE              X:(R4)+,A               ; Integrator Speed (0 for slow, 1 for fast)
+695       P:03B9 P:03B9 0ACC00            JCLR    #0,A1,STG_B
+                        0003BD
+696       P:03BB P:03BB 0ACD68            BSET    #8,B1
+697       P:03BC P:03BC 0ACD69            BSET    #9,B1
+698       P:03BD P:03BD 44F400  STG_B     MOVE              #$0C3C00,X0
+                        0C3C00
+699       P:03BF P:03BF 20004A            OR      X0,B
+700       P:03C0 P:03C0 5F0000            MOVE                          B,Y:<GAIN   ; Store the GAIN value for later us
+701    
+702                             ; Send this same value to 15 video processor boards whether they exist or not
+703       P:03C1 P:03C1 241000            MOVE              #$100000,X0             ; Increment value
+704       P:03C2 P:03C2 060F80            DO      #15,STG_LOOP
+                        0003C7
+705       P:03C4 P:03C4 577000            MOVE              B,X:SSITX               ; Transmit the SSI word
+                        00FFEF
+706       P:03C6 P:03C6 0D02C4            JSR     <PAL_DLY                          ; Wait for SSI and PAL to be empty
+707       P:03C7 P:03C7 200048            ADD     X0,B                              ; Increment the video processor board number
+708                             STG_LOOP
+709    
+710       P:03C8 P:03C8 0D037A            JSR     <SER_UTL                          ; Return SSI to utility board communication
+711       P:03C9 P:03C9 0C0000            JMP     <FINISH
+712       P:03CA P:03CA 56DC00  ERR_SGN   MOVE              X:(R4)+,A
+713       P:03CB P:03CB 0D037A            JSR     <SER_UTL                          ; Return SSI to utility board communication
+714       P:03CC P:03CC 0C0000            JMP     <ERROR
+715    
+716                             ; Write an arbitraty control word over the SSI link to any register, any board
+717                             ; Command syntax is  WRC number, number is 24-bit number to be sent to any board
+718                             ;WR_CNTRL
+719                             ;       JSR     <SER_ANA        ; Set SSI to analog board communication
+720                             ;       JSR     <PAL_DLY        ; Wait for the number to be sent
+721                             ;        MOVEP  X:(R4)+,X:SSITX ; Send out the waveform
+722                             ;       JSR     <PAL_DLY        ; Wait for SSI and PAL to be empty
+723                             ;       JSR     <SER_UTL        ; Return SSI to utility board communication
+724                             ;       JMP     <FINISH
+725    
+726                             ; Set the video processor boards in DC-coupled diagnostic mode or not
+727                             ; Command syntax is  SDC #      # = 0 for normal operation
+728                             ;                               # = 1 for DC coupled diagnostic mode
+729       P:03CD P:03CD 0D0373  SET_DC    JSR     <SER_ANA                          ; Set SSI to analog board communication
+730       P:03CE P:03CE 44DC00            MOVE              X:(R4)+,X0
+731       P:03CF P:03CF 0AC420            JSET    #0,X0,SDC_1
+                        0003D4
+732       P:03D1 P:03D1 0A004A            BCLR    #10,Y:<GAIN
+733       P:03D2 P:03D2 0A004B            BCLR    #11,Y:<GAIN
+734       P:03D3 P:03D3 0C03D6            JMP     <SDC_A
+735       P:03D4 P:03D4 0A006A  SDC_1     BSET    #10,Y:<GAIN
+736       P:03D5 P:03D5 0A006B            BSET    #11,Y:<GAIN
+737       P:03D6 P:03D6 241000  SDC_A     MOVE              #$100000,X0             ; Increment value
+738       P:03D7 P:03D7 060F80            DO      #15,SDC_LOOP
+                        0003DC
+739       P:03D9 P:03D9 08F0EF            MOVEP             Y:GAIN,X:SSITX
+                        000000
+740       P:03DB P:03DB 0D02C4            JSR     <PAL_DLY                          ; Wait for SSI and PAL to be empty
+741       P:03DC P:03DC 200048            ADD     X0,B                              ; Increment the video processor board number
+742                             SDC_LOOP
+743       P:03DD P:03DD 0D037A            JSR     <SER_UTL                          ; Return SSI to utility board communication
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timCCDmisc.s  Page 15
+
+
+
+744       P:03DE P:03DE 0C0000            JMP     <FINISH
+745    
+746                             ; Set a particular DAC numbers, for setting DC bias voltages, clock driver
+747                             ;   voltages and video processor offset
+748                             ;
+749                             ; SBN  #BOARD  ['CLK' or 'VID']  #DAC  voltage
+750                             ;
+751                             ;                               #BOARD is from 0 to 15
+752                             ;                               #DAC number
+753                             ;                               #voltage is from 0 to 4095
+754    
+755                             SET_BIAS_NUMBER                                     ; Set bias number
+756       P:03DF P:03DF 0D0373            JSR     <SER_ANA                          ; Set SSI to analog board communication
+757       P:03E0 P:03E0 56DC00            MOVE              X:(R4)+,A               ; First argument is board number, 0 to 15
+758       P:03E1 P:03E1 0614A0            REP     #20
+759       P:03E2 P:03E2 200033            LSL     A
+760       P:03E3 P:03E3 21C400            MOVE              A,X0
+761       P:03E4 P:03E4 56DC00            MOVE              X:(R4)+,A               ; Second argument is DAC number
+762       P:03E5 P:03E5 060EA0            REP     #14
+763       P:03E6 P:03E6 200033            LSL     A
+764       P:03E7 P:03E7 200042            OR      X0,A
+765       P:03E8 P:03E8 57DC00            MOVE              X:(R4)+,B               ; Third argument is 'VID' or 'CLK' string
+766       P:03E9 P:03E9 44F400            MOVE              #'VID',X0
+                        564944
+767       P:03EB P:03EB 20004D            CMP     X0,B
+768       P:03EC P:03EC 0E23F0            JNE     <CLK_DRV
+769       P:03ED P:03ED 0ACC73            BSET    #19,A1                            ; Set bits to mean video processor DAC
+770       P:03EE P:03EE 0ACC72            BSET    #18,A1
+771       P:03EF P:03EF 0C03F4            JMP     <VID_BRD
+772       P:03F0 P:03F0 44F400  CLK_DRV   MOVE              #'CLK',X0
+                        434C4B
+773       P:03F2 P:03F2 20004D            CMP     X0,B
+774       P:03F3 P:03F3 0E23FE            JNE     <ERR_SBN
+775       P:03F4 P:03F4 21C400  VID_BRD   MOVE              A,X0
+776       P:03F5 P:03F5 56DC00            MOVE              X:(R4)+,A               ; Fourth argument is voltage value, 0 to $fff
+777       P:03F6 P:03F6 46F400            MOVE              #$000FFF,Y0             ; Mask off just 12 bits to be sure
+                        000FFF
+778       P:03F8 P:03F8 200056            AND     Y0,A
+779       P:03F9 P:03F9 200042            OR      X0,A
+780       P:03FA P:03FA 08CE2F            MOVEP             A,X:SSITX               ; Write the number to the DAC
+781       P:03FB P:03FB 0D02C4            JSR     <PAL_DLY                          ; Wait for the number to be sent
+782       P:03FC P:03FC 0D037A            JSR     <SER_UTL                          ; Return SSI to utility board communication
+783       P:03FD P:03FD 0C0000            JMP     <FINISH
+784       P:03FE P:03FE 56DC00  ERR_SBN   MOVE              X:(R4)+,A               ; Read and discard the fourth argument
+785       P:03FF P:03FF 0D037A            JSR     <SER_UTL                          ; Return SSI to utility board communication
+786       P:0400 P:0400 0C0000            JMP     <ERROR
+787    
+788                             ; Specify the MUX value to be output on the clock driver board
+789                             ; Command syntax is  SMX  #clock_driver_board #MUX1 #MUX2
+790                             ;                               #clock_driver_board from 0 to 15
+791                             ;                               #MUX1, #MUX2 from 0 to 23
+792    
+793       P:0401 P:0401 0D0373  SET_MUX   JSR     <SER_ANA                          ; Set SSI to analog board communication
+794       P:0402 P:0402 56DC00            MOVE              X:(R4)+,A               ; Clock driver board number
+795       P:0403 P:0403 0614A0            REP     #20
+796       P:0404 P:0404 200033            LSL     A
+797       P:0405 P:0405 44F400            MOVE              #$003000,X0
+                        003000
+798       P:0407 P:0407 200042            OR      X0,A
+799       P:0408 P:0408 21C500            MOVE              A,X1                    ; Move here for storage
+800    
+801                             ; Get the first MUX number
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timCCDmisc.s  Page 16
+
+
+
+802       P:0409 P:0409 56DC00            MOVE              X:(R4)+,A               ; Get the first MUX number
+803       P:040A P:040A 0AF0A9            JLT     ERR_SM1
+                        00044C
+804       P:040C P:040C 44F400            MOVE              #>24,X0                 ; Check for argument less than 32
+                        000018
+805       P:040E P:040E 200045            CMP     X0,A
+806       P:040F P:040F 0AF0A1            JGE     ERR_SM1
+                        00044C
+807       P:0411 P:0411 21CF00            MOVE              A,B
+808       P:0412 P:0412 44F400            MOVE              #>7,X0
+                        000007
+809       P:0414 P:0414 20004E            AND     X0,B
+810       P:0415 P:0415 44F400            MOVE              #>$18,X0
+                        000018
+811       P:0417 P:0417 200046            AND     X0,A
+812       P:0418 P:0418 0E241B            JNE     <SMX_1                            ; Test for 0 <= MUX number <= 7
+813       P:0419 P:0419 0ACD63            BSET    #3,B1
+814       P:041A P:041A 0C0426            JMP     <SMX_A
+815       P:041B P:041B 44F400  SMX_1     MOVE              #>$08,X0
+                        000008
+816       P:041D P:041D 200045            CMP     X0,A                              ; Test for 8 <= MUX number <= 15
+817       P:041E P:041E 0E2421            JNE     <SMX_2
+818       P:041F P:041F 0ACD64            BSET    #4,B1
+819       P:0420 P:0420 0C0426            JMP     <SMX_A
+820       P:0421 P:0421 44F400  SMX_2     MOVE              #>$10,X0
+                        000010
+821       P:0423 P:0423 200045            CMP     X0,A                              ; Test for 16 <= MUX number <= 23
+822       P:0424 P:0424 0E244C            JNE     <ERR_SM1
+823       P:0425 P:0425 0ACD65            BSET    #5,B1
+824       P:0426 P:0426 20006A  SMX_A     OR      X1,B1                             ; Add prefix to MUX numbers
+825       P:0427 P:0427 21A700            MOVE              B1,Y1
+826    
+827                             ; Add on the second MUX number
+828       P:0428 P:0428 56DC00            MOVE              X:(R4)+,A               ; Get the next MUX number
+829       P:0429 P:0429 0AF0A9            JLT     ERR_SM2
+                        00044D
+830       P:042B P:042B 44F400            MOVE              #>24,X0                 ; Check for argument less than 32
+                        000018
+831       P:042D P:042D 200045            CMP     X0,A
+832       P:042E P:042E 0AF0A1            JGE     ERR_SM2
+                        00044D
+833       P:0430 P:0430 0606A0            REP     #6
+834       P:0431 P:0431 200033            LSL     A
+835       P:0432 P:0432 21CF00            MOVE              A,B
+836       P:0433 P:0433 44F400            MOVE              #$1C0,X0
+                        0001C0
+837       P:0435 P:0435 20004E            AND     X0,B
+838       P:0436 P:0436 44F400            MOVE              #>$600,X0
+                        000600
+839       P:0438 P:0438 200046            AND     X0,A
+840       P:0439 P:0439 0E243C            JNE     <SMX_3                            ; Test for 0 <= MUX number <= 7
+841       P:043A P:043A 0ACD69            BSET    #9,B1
+842       P:043B P:043B 0C0447            JMP     <SMX_B
+843       P:043C P:043C 44F400  SMX_3     MOVE              #>$200,X0
+                        000200
+844       P:043E P:043E 200045            CMP     X0,A                              ; Test for 8 <= MUX number <= 15
+845       P:043F P:043F 0E2442            JNE     <SMX_4
+846       P:0440 P:0440 0ACD6A            BSET    #10,B1
+847       P:0441 P:0441 0C0447            JMP     <SMX_B
+848       P:0442 P:0442 44F400  SMX_4     MOVE              #>$400,X0
+                        000400
+849       P:0444 P:0444 200045            CMP     X0,A                              ; Test for 16 <= MUX number <= 23
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timCCDmisc.s  Page 17
+
+
+
+850       P:0445 P:0445 0E244D            JNE     <ERR_SM2
+851       P:0446 P:0446 0ACD6B            BSET    #11,B1
+852       P:0447 P:0447 200078  SMX_B     ADD     Y1,B                              ; Add prefix to MUX numbers
+853    
+854       P:0448 P:0448 08CD2F            MOVEP             B1,X:SSITX
+855       P:0449 P:0449 0D02C4            JSR     <PAL_DLY                          ; Delay for all this to happen
+856       P:044A P:044A 0D037A            JSR     <SER_UTL                          ; Return SSI to utility board communication
+857       P:044B P:044B 0C0000            JMP     <FINISH
+858       P:044C P:044C 56DC00  ERR_SM1   MOVE              X:(R4)+,A
+859       P:044D P:044D 0D037A  ERR_SM2   JSR     <SER_UTL                          ; Return SSI to utility board communication
+860       P:044E P:044E 0C0000            JMP     <ERROR
+861    
+862                             ; Specify subarray readout coordinates, one rectangle only
+863                             SET_SUBARRAY_SIZES
+864       P:044F P:044F 200013            CLR     A
+865       P:0450 P:0450 5E1A00            MOVE                          A,Y:<NBOXES ; Number of subimage boxes = 0 to start
+866       P:0451 P:0451 44DC00            MOVE              X:(R4)+,X0
+867       P:0452 P:0452 4C1B00            MOVE                          X0,Y:<NR_BIAS ; Number of bias pixels to read
+868       P:0453 P:0453 44DC00            MOVE              X:(R4)+,X0
+869       P:0454 P:0454 4C1C00            MOVE                          X0,Y:<NS_READ ; Number of columns in subimage read
+870       P:0455 P:0455 44DC00            MOVE              X:(R4)+,X0
+871       P:0456 P:0456 4C1D00            MOVE                          X0,Y:<NP_READ ; Number of rows in subimage read
+872       P:0457 P:0457 0C0000            JMP     <FINISH
+873    
+874                             ; Call this routine once for every subarray to be added to the table
+875                             SET_SUBARRAY_POSITIONS
+876       P:0458 P:0458 4C9A00            MOVE                          Y:<NBOXES,X0
+877       P:0459 P:0459 458000            MOVE              X:<THREE,X1
+878       P:045A P:045A 2000A0            MPY     X0,X1,A
+879       P:045B P:045B 200022            ASR     A
+880       P:045C P:045C 210C00            MOVE              A0,A1
+881       P:045D P:045D 44F400            MOVE              #>10,X0
+                        00000A
+882       P:045F P:045F 200045            CMP     X0,A
+883       P:0460 P:0460 0E7000            JGT     <ERROR                            ; Error if number of boxes > 10
+884       P:0461 P:0461 44F400            MOVE              #READ_TABLE,X0
+                        00001E
+885       P:0463 P:0463 200040            ADD     X0,A
+886       P:0464 P:0464 219700            MOVE              A1,R7
+887       P:0465 P:0465 44DC00            MOVE              X:(R4)+,X0
+888       P:0466 P:0466 4C5F00            MOVE                          X0,Y:(R7)+  ; Number of rows (parallels) to clear
+889       P:0467 P:0467 44DC00            MOVE              X:(R4)+,X0
+890       P:0468 P:0468 4C5F00            MOVE                          X0,Y:(R7)+  ; Number of columns (serials) clears before
+891       P:0469 P:0469 44DC00            MOVE              X:(R4)+,X0              ;  the box readout
+892       P:046A P:046A 4C5F00            MOVE                          X0,Y:(R7)+  ; Number of columns (serials) clears after
+893       P:046B P:046B 5E9A00            MOVE                          Y:<NBOXES,A ;  the box readout
+894       P:046C P:046C 448000            MOVE              X:<ONE,X0
+895       P:046D P:046D 200040            ADD     X0,A
+896       P:046E P:046E 5E1A00            MOVE                          A,Y:<NBOXES
+897       P:046F P:046F 0C0000            JMP     <FINISH
+898    
+899                             ; Alert the PCI interface board that images are coming soon
+900                             PCI_READ_IMAGE
+901       P:0470 P:0470 44F400            MOVE              #$020104,X0             ; Send header word to the FO transmitter
+                        020104
+902       P:0472 P:0472 0D048B            JSR     <XMT_FO
+903       P:0473 P:0473 44F400            MOVE              #'RDA',X0
+                        524441
+904       P:0475 P:0475 0D048B            JSR     <XMT_FO
+905       P:0476 P:0476 4CF000            MOVE                          Y:NSR,X0    ; Number of columns to read
+                        000001
+906       P:0478 P:0478 0D048B            JSR     <XMT_FO
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  timCCDmisc.s  Page 18
+
+
+
+907       P:0479 P:0479 4CF000            MOVE                          Y:NPR,X0    ; Number of rows to read
+                        000002
+908       P:047B P:047B 0D048B            JSR     <XMT_FO
+909       P:047C P:047C 00000C            RTS
+910    
+911                             ; Put PCI board in reading image out mode to block commands to the timing board
+912                             READING_IMAGE_ON
+913       P:047D P:047D 44F400            MOVE              #$020102,X0             ; Send header word to the FO transmitter
+                        020102
+914       P:047F P:047F 0D048B            JSR     <XMT_FO
+915       P:0480 P:0480 44F400            MOVE              #'RDI',X0
+                        524449
+916       P:0482 P:0482 0D048B            JSR     <XMT_FO
+917       P:0483 P:0483 00000C            RTS
+918    
+919                             ; Restore PCI board to normally processing comamnds
+920                             READING_IMAGE_OFF
+921       P:0484 P:0484 44F400            MOVE              #$020102,X0             ; Send header word to the FO transmitter
+                        020102
+922       P:0486 P:0486 0D048B            JSR     <XMT_FO
+923       P:0487 P:0487 44F400            MOVE              #'RDO',X0
+                        52444F
+924       P:0489 P:0489 0D048B            JSR     <XMT_FO
+925       P:048A P:048A 00000C            RTS
+926    
+927       P:048B P:048B 09C400  XMT_FO    MOVEP             X0,Y:WRFO
+928       P:048C P:048C 060FA0            REP     #15
+929       P:048D P:048D 000000            NOP
+930       P:048E P:048E 00000C            RTS
+931    
+932    
+933                             ;**************************************************************************
+934                             ;                                                                         *
+935                             ;    Permanent address register assignments                               *
+936                             ;        R1 - Address of SSI receiver contents                            *
+937                             ;        R2 - Address of SCI receiver contents                            *
+938                             ;        R3 - Pointer to current top of command buffer                    *
+939                             ;        R4 - Pointer to processed contents of command buffer             *
+940                             ;        R5 - Temporary register for processing SSI and SCI contents      *
+941                             ;        R6 - CCD clock driver address for CCD #0 = $FF80                 *
+942                             ;                It is also the A/D address of analog board #0            *
+943                             ;                                                                         *
+944                             ;    Other registers                                                      *
+945                             ;        R0, R7 - Temporary registers used all over the place.            *
+946                             ;        R5 - Can be used as a temporary register but is circular,        *
+947                             ;               modulo 32.                                                *
+948                             ;**************************************************************************
+949    
+950                             ; Specify execution and load addresses
+951                                       IF      @SCP("HOST","HOST")
+952       P:0130 P:0130                   ORG     P:APL_ADR,P:APL_ADR               ; Download address
+953                                       ELSE
+955                                       ENDIF
+956    
+957                             ;  ***********************   CCD  READOUT   ***********************
+958                             ; Overall loop - transfer and read NPR lines
+959       P:0130 P:0130 0A0024  RDCCD     BSET    #ST_RDC,X:<STATUS                 ; Set status to reading out
+960       P:0131 P:0131 0D0470            JSR     <PCI_READ_IMAGE                   ; Get the PCI board reading the image
+961       P:0132 P:0132 0AA421            BSET    #WW,X:PBD                         ; Set WW = 1 for 16-bit image data
+962       P:0133 P:0133 0A00AA            JSET    #TST_IMG,X:STATUS,SYNTHETIC_IMAGE
+                        0002D7
+963    
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  tim.s  Page 19
+
+
+
+964                             ; Calculate some more readout parameters
+965       P:0135 P:0135 5E9A00            MOVE                          Y:<NBOXES,A ; NBOXES = 0 => full image readout
+966       P:0136 P:0136 200003            TST     A
+967       P:0137 P:0137 0E2141            JNE     <SUB_IMG
+968       P:0138 P:0138 5C1700            MOVE                          A1,Y:<NP_SKIP ; Zero these all out
+969       P:0139 P:0139 5C1800            MOVE                          A1,Y:<NS_SKP1
+970       P:013A P:013A 5C1900            MOVE                          A1,Y:<NS_SKP2
+971       P:013B P:013B 5E8100            MOVE                          Y:<NSR,A    ; NSERIALS_READ = NSR
+972       P:013C P:013C 0A0085            JCLR    #SPLIT_S,X:STATUS,*+3
+                        00013F
+973       P:013E P:013E 200022            ASR     A                                 ; Split serials require / 2
+974       P:013F P:013F 5E1100            MOVE                          A,Y:<NSERIALS_READ ; Number of columns in each subimage
+975       P:0140 P:0140 0C0150            JMP     <SETUP
+976    
+977                             ; Loop over the required number of subimage boxes
+978       P:0141 P:0141 67F400  SUB_IMG   MOVE              #READ_TABLE,R7          ; Parameter table for subimage readout
+                        00001E
+979       P:0143 P:0143 061A40            DO      Y:<NBOXES,L_NBOXES                ; Loop over number of boxes
+                        0001D4
+980       P:0145 P:0145 4CDF00            MOVE                          Y:(R7)+,X0
+981       P:0146 P:0146 4C1700            MOVE                          X0,Y:<NP_SKIP
+982       P:0147 P:0147 4CDF00            MOVE                          Y:(R7)+,X0
+983       P:0148 P:0148 4C1800            MOVE                          X0,Y:<NS_SKP1
+984       P:0149 P:0149 4CDF00            MOVE                          Y:(R7)+,X0
+985       P:014A P:014A 4C1900            MOVE                          X0,Y:<NS_SKP2
+986       P:014B P:014B 5E9C00            MOVE                          Y:<NS_READ,A
+987       P:014C P:014C 0A0085            JCLR    #SPLIT_S,X:STATUS,*+3             ; Split serials require / 2
+                        00014F
+988       P:014E P:014E 200022            ASR     A
+989       P:014F P:014F 5E1100            MOVE                          A,Y:<NSERIALS_READ ; Number of columns in each subimage
+990    
+991                             ; Calculate the fast read parameters
+992       P:0150 P:0150 0D029F  SETUP     JSR     <SETUP_SUBROUTINE
+993    
+994                             ; Skip over the required number of rows for subimage readout
+995       P:0151 P:0151 5E9700            MOVE                          Y:<NP_SKIP,A ; Number of rows NPSKIP to skip
+996       P:0152 P:0152 200003            TST     A
+997       P:0153 P:0153 0EA15A            JEQ     <CLR_SR
+998       P:0154 P:0154 061740            DO      Y:<NP_SKIP,L_SKIP1                ; Clock number of rows to skip
+                        000159
+999       P:0156 P:0156 68F000            MOVE                          Y:PARALLEL_CLEAR,R0
+                        000010
+1000      P:0158 P:0158 0D01DE            JSR     <CLOCK
+1001      P:0159 P:0159 000000            NOP
+1002                            L_SKIP1
+1003   
+1004                            ; Clear out the accumulated charge from the serial shift register
+1005      P:015A P:015A 05F421  CLR_SR    MOVE              #(END_SERIAL_SKIP_CLOCKS-SERIAL_SKIP_CLOCKS-1),M1 ; Modularity
+                        000006
+1006      P:015C P:015C 698C00            MOVE                          Y:<SERIAL_SKIP,R1 ; Waveform table starting address
+1007      P:015D P:015D 000000            NOP
+1008      P:015E P:015E 5ED900            MOVE                          Y:(R1)+,A   ; Start the pipeline
+1009      P:015F P:015F 061240            DO      Y:<NSCLR,LS_CLR                   ; Number of waveform entries total
+                        000161
+1010      P:0161 P:0161 FA2600            MOVE              A,X:(R6)    Y:(R1)+,A   ; Send out the waveform
+1011                            LS_CLR
+1012      P:0162 P:0162 566600            MOVE              A,X:(R6)                ; Flush out the pipeline
+1013   
+1014                            ; Parallel shift the image into the serial shift register
+1015      P:0163 P:0163 4C8200            MOVE                          Y:<NPR,X0   ; Number of rows set by host computer
+1016      P:0164 P:0164 5E9A00            MOVE                          Y:<NBOXES,A ; NBOXES = 0 => full image readout
+1017      P:0165 P:0165 200003            TST     A
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  tim.s  Page 20
+
+
+
+1018      P:0166 P:0166 0EA168            JEQ     *+2
+1019      P:0167 P:0167 4C9D00            MOVE                          Y:<NP_READ,X0 ; If NBOXES .NE. 0 use subimage table
+1020   
+1021                            ; Main loop over each line to be read out
+1022      P:0168 P:0168 0A0086            JCLR    #SPLIT_P,X:STATUS,PLOOP           ; Split Parallel require / 2
+                        00016D
+1023      P:016A P:016A 5E8200            MOVE                          Y:<NPR,A
+1024      P:016B P:016B 200022            ASR     A
+1025      P:016C P:016C 21C400            MOVE              A,X0
+1026      P:016D P:016D 06C400  PLOOP     DO      X0,LPR                            ; Number of rows to read out
+                        0001D3
+1027   
+1028                            ; Check for a command once per line. Only the ABORT command is allowed
+1029      P:016F P:016F 0D0000            JSR     <GET_RCV                          ; Was a command received?
+1030      P:0170 P:0170 0E017A            JCC     <CONT_RD                          ; If no, continue reading out
+1031      P:0171 P:0171 0C0000            JMP     <CHK_SSI                          ; If yes, go process it
+1032   
+1033                            ; Abort the readout currently underway
+1034      P:0172 P:0172 0A0084  ABR_RDC   JCLR    #ST_RDC,X:<STATUS,START           ; Do nothing - we're not reading out
+                        000008
+1035      P:0174 P:0174 00008C            ENDDO                                     ; Properly terminate readout loop
+1036      P:0175 P:0175 5E9A00            MOVE                          Y:<NBOXES,A ; NBOXES = 0 => full image readout
+1037      P:0176 P:0176 200003            TST     A
+1038      P:0177 P:0177 0EA179            JEQ     *+2
+1039      P:0178 P:0178 00008C            ENDDO                                     ; Properly terminate readout loop
+1040      P:0179 P:0179 0C01D6            JMP     <RDC_END
+1041   
+1042      P:017A P:017A 060640  CONT_RD   DO      Y:<NPBIN,LPR_I                    ; Transfer # of rows, with binning
+                        00017F
+1043      P:017C P:017C 68F000            MOVE                          Y:PARALLEL_CLOCK,R0
+                        00000F
+1044      P:017E P:017E 0D01DE            JSR     <CLOCK                            ; Go clock out the CCD charge
+1045      P:017F P:017F 000000            NOP
+1046                            LPR_I
+1047   
+1048                            ; Skip over NS_SKP1 columns for subimage readout
+1049      P:0180 P:0180 5E9800            MOVE                          Y:<NS_SKP1,A ; Number of columns to skip
+1050      P:0181 P:0181 200003            TST     A
+1051      P:0182 P:0182 0EA18B            JEQ     <L_READ
+1052      P:0183 P:0183 0506A1            MOVE              #<(END_SERIAL_SKIP_CLOCKS-SERIAL_SKIP_CLOCKS-1),M1 ;Modularity
+1053      P:0184 P:0184 698C00            MOVE                          Y:<SERIAL_SKIP,R1 ; Waveform table starting address
+1054      P:0185 P:0185 000000            NOP
+1055      P:0186 P:0186 5ED900            MOVE                          Y:(R1)+,A   ; Start the pipeline
+1056      P:0187 P:0187 061340            DO      Y:<NSKIP1,LS_SKIP1                ; Number of waveform entries total
+                        000189
+1057      P:0189 P:0189 FA2600            MOVE              A,X:(R6)    Y:(R1)+,A   ; Send out the waveform
+1058                            LS_SKIP1
+1059      P:018A P:018A 566600            MOVE              A,X:(R6)                ; Flush out the pipeline
+1060   
+1061                            ; Finally read some real pixels - this is the serial binning routine
+1062      P:018B P:018B 5F8500  L_READ    MOVE                          Y:<NSBIN,B  ; Serial binning parameter
+1063      P:018C P:018C 448000            MOVE              X:<ONE,X0
+1064      P:018D P:018D 20004D            CMP     X0,B
+1065      P:018E P:018E 0EA19E            JEQ     <NO_BIN                           ; Skip over serial binning softwarebe
+1066      P:018F P:018F 061140            DO      Y:<NSERIALS_READ,LSR_BIN          ; Number of pixels to read out
+                        00019C
+1067      P:0191 P:0191 60F400            MOVE              #RESET_NODE,R0
+                        00004B
+1068      P:0193 P:0193 0D01DE            JSR     <CLOCK
+1069      P:0194 P:0194 060540            DO      Y:<NSBIN,LSR_I                    ; Bin serially NSBIN times
+                        000198
+1070      P:0196 P:0196 688E00            MOVE                          Y:<SERIAL_CLOCK,R0 ; Clock the charge in the serial
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  tim.s  Page 21
+
+
+
+1071      P:0197 P:0197 0D01DE            JSR     <CLOCK                            ;   shift register
+1072      P:0198 P:0198 000000            NOP
+1073                            LSR_I
+1074      P:0199 P:0199 60F400            MOVE              #VIDEO_PROCESS,R0       ; Video process the binned pixel
+                        00006A
+1075      P:019B P:019B 0D01DE            JSR     <CLOCK
+1076      P:019C P:019C 000000            NOP
+1077                            LSR_BIN
+1078      P:019D P:019D 0C01A6            JMP     <OVER_RD                          ; All done binning
+1079   
+1080                            ; This is the routine for NO serial binning
+1081      P:019E P:019E 050DA1  NO_BIN    MOVE              #<(END_SERIAL_READ_ALL-SERIAL_READ_ALL-1),M1 ; Modularity
+1082      P:019F P:019F 698D00            MOVE                          Y:<SERIAL_READ,R1 ; Waveform table starting address
+1083      P:01A0 P:01A0 000000            NOP
+1084      P:01A1 P:01A1 5ED900            MOVE                          Y:(R1)+,A   ; Start the pipeline
+1085      P:01A2 P:01A2 061440            DO      Y:<NREAD,LSR                      ; Number of waveform entries total
+                        0001A4
+1086      P:01A4 P:01A4 FA2600            MOVE              A,X:(R6)    Y:(R1)+,A   ; Send out the waveform
+1087                            LSR
+1088      P:01A5 P:01A5 566600            MOVE              A,X:(R6)                ; Flush out the pipeline
+1089   
+1090                            ; Skip over NS_SKP1 columns for subimage readout
+1091      P:01A6 P:01A6 5E9900  OVER_RD   MOVE                          Y:<NS_SKP2,A ; Number of columns to skip
+1092      P:01A7 P:01A7 200003            TST     A
+1093      P:01A8 P:01A8 0EA1B1            JEQ     <L_BIAS
+1094      P:01A9 P:01A9 0506A1            MOVE              #<(END_SERIAL_SKIP_CLOCKS-SERIAL_SKIP_CLOCKS-1),M1 ;Modularity
+1095      P:01AA P:01AA 698C00            MOVE                          Y:<SERIAL_SKIP,R1 ; Waveform table starting address
+1096      P:01AB P:01AB 000000            NOP
+1097      P:01AC P:01AC 5ED900            MOVE                          Y:(R1)+,A   ; Start the pipeline
+1098      P:01AD P:01AD 061540            DO      Y:<NSKIP2,LS_SKIP2                ; Number of waveform entries total
+                        0001AF
+1099      P:01AF P:01AF FA2600            MOVE              A,X:(R6)    Y:(R1)+,A   ; Send out the waveform
+1100                            LS_SKIP2
+1101      P:01B0 P:01B0 566600            MOVE              A,X:(R6)                ; Flush out the pipeline
+1102   
+1103                            ; And read the bias pixels if in subimage readout mode
+1104      P:01B1 P:01B1 5E9A00  L_BIAS    MOVE                          Y:<NBOXES,A ; NBOXES = 0 => full image readout
+1105      P:01B2 P:01B2 200003            TST     A
+1106      P:01B3 P:01B3 0EA1D3            JEQ     <END_ROW
+1107   
+1108                            ; Finally read some real bias pixels
+1109      P:01B4 P:01B4 5F8500            MOVE                          Y:<NSBIN,B  ; Serial binning parameter
+1110      P:01B5 P:01B5 448000            MOVE              X:<ONE,X0
+1111      P:01B6 P:01B6 20004D            CMP     X0,B
+1112      P:01B7 P:01B7 0EA1CB            JEQ     <NO_BIN_BIAS                      ; Skip over serial binning software
+1113   
+1114      P:01B8 P:01B8 5E9B00            MOVE                          Y:<NR_BIAS,A
+1115      P:01B9 P:01B9 0A0085            JCLR    #SPLIT_S,X:STATUS,*+3
+                        0001BC
+1116      P:01BB P:01BB 200022            ASR     A                                 ; Split serials require / 2
+1117      P:01BC P:01BC 06CE00            DO      A,LBIAS_BIN                       ; Number of pixels to read out
+                        0001C9
+1118      P:01BE P:01BE 60F400            MOVE              #RESET_NODE,R0
+                        00004B
+1119      P:01C0 P:01C0 0D01DE            JSR     <CLOCK
+1120      P:01C1 P:01C1 060540            DO      Y:<NSBIN,LBIAS_I                  ; Bin serially NSBIN times
+                        0001C5
+1121      P:01C3 P:01C3 688E00            MOVE                          Y:<SERIAL_CLOCK,R0 ; Clock the charge in the serial
+1122      P:01C4 P:01C4 0D01DE            JSR     <CLOCK                            ;   shift register
+1123      P:01C5 P:01C5 000000            NOP
+1124                            LBIAS_I
+1125      P:01C6 P:01C6 60F400            MOVE              #VIDEO_PROCESS,R0       ; Video process the binned pixel
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  tim.s  Page 22
+
+
+
+                        00006A
+1126      P:01C8 P:01C8 0D01DE            JSR     <CLOCK
+1127      P:01C9 P:01C9 000000            NOP
+1128                            LBIAS_BIN
+1129      P:01CA P:01CA 0C01D3            JMP     <END_ROW                          ; All done binning
+1130   
+1131                            ; This is the NO serial binning routine
+1132                            NO_BIN_BIAS
+1133      P:01CB P:01CB 050DA1            MOVE              #<(END_SERIAL_READ_ALL-SERIAL_READ_ALL-1),M1 ; Modularity
+1134      P:01CC P:01CC 698D00            MOVE                          Y:<SERIAL_READ,R1 ; Waveform table starting address
+1135      P:01CD P:01CD 000000            NOP
+1136      P:01CE P:01CE 5ED900            MOVE                          Y:(R1)+,A   ; Start the pipeline
+1137      P:01CF P:01CF 061640            DO      Y:<NBIAS,LR_BIAS                  ; Number of waveform entries total
+                        0001D1
+1138      P:01D1 P:01D1 FA2600            MOVE              A,X:(R6)    Y:(R1)+,A   ; Send out the waveform
+1139                            LR_BIAS
+1140      P:01D2 P:01D2 566600            MOVE              A,X:(R6)                ; Flush out the pipeline
+1141      P:01D3 P:01D3 000000  END_ROW   NOP
+1142      P:01D4 P:01D4 000000  LPR       NOP                                       ; End of parallel loop
+1143      P:01D5 P:01D5 000000  L_NBOXES  NOP                                       ; End of subimage boxes loop
+1144   
+1145                            ; Restore the controller to non-image data transfer and idling if necessary
+1146      P:01D6 P:01D6 0AA401  RDC_END   BCLR    #WW,X:PBD                         ; Clear WW to 0 for 32-bit commands
+1147      P:01D7 P:01D7 0A0004            BCLR    #ST_RDC,X:<STATUS                 ; Set status to reading out
+1148      P:01D8 P:01D8 0A0082            JCLR    #IDLMODE,X:<STATUS,START          ; Don't idle after readout
+                        000008
+1149      P:01DA P:01DA 44F400            MOVE              #IDLE,X0
+                        000291
+1150      P:01DC P:01DC 440000            MOVE              X0,X:<IDL_ADR
+1151      P:01DD P:01DD 0C0008            JMP     <START                            ; Wait for a new command
+1152   
+1153                            ;  *************************    SUBROUTINE    ***********************
+1154                            ; Core subroutine for clocking out CCD charge
+1155      P:01DE P:01DE 4CD800  CLOCK     MOVE                          Y:(R0)+,X0  ; # of waveform entries
+1156      P:01DF P:01DF 5ED800            MOVE                          Y:(R0)+,A   ; Start the pipeline
+1157      P:01E0 P:01E0 06C400            DO      X0,CLK1                           ; Repeat X0 times
+                        0001E2
+1158      P:01E2 P:01E2 FA0600            MOVE              A,X:(R6)    Y:(R0)+,A   ; Send out the waveform
+1159                            CLK1
+1160      P:01E3 P:01E3 566600            MOVE              A,X:(R6)                ; Flush out the pipeline
+1161      P:01E4 P:01E4 00000C            RTS                                       ; Return from subroutine
+1162   
+1163                            ; Check for program overflow
+1164                                      IF      @CVS(N,*)>$200
+1166                                      ENDIF                                     ;  will not overflow
+1167   
+1168                            ; ***********  DATA AREAS - READOUT PARAMETERS AND WAVEFORMS  ************
+1169   
+1170                            ; Command table - make sure there are exactly 32 entries in it
+1171                                      IF      @SCP("HOST","HOST")
+1172      X:0080 X:0080                   ORG     X:COM_TBL,X:COM_TBL               ; Download address
+1173                                      ELSE
+1175                                      ENDIF
+1176      X:0080 X:0080                   DC      'IDL',IDL                         ; Put CCD in IDLE mode
+1177      X:0082 X:0082                   DC      'STP',STP                         ; Exit IDLE mode
+1178      X:0084 X:0084                   DC      'SBV',SETBIAS                     ; Set DC bias supply voltages
+1179      X:0086 X:0086                   DC      'RDC',RDCCD                       ; Begin CCD readout
+1180      X:0088 X:0088                   DC      'CLR',CLEAR                       ; Fast clear the CCD
+1181      X:008A X:008A                   DC      'SGN',ST_GAIN                     ; Set video processor gain
+1182      X:008C X:008C                   DC      'SDC',SET_DC                      ; Set DC coupled diagnostic mode
+1183      X:008E X:008E                   DC      'SBN',SET_BIAS_NUMBER             ; Set bias number
+1184      X:0090 X:0090                   DC      'SMX',SET_MUX                     ; Set clock driver MUX outputs
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  tim.s  Page 23
+
+
+
+1185      X:0092 X:0092                   DC      'ABR',ABR_RDC                     ; Abort readout
+1186      X:0094 X:0094                   DC      'CRD',CONT_RD                     ; Continue reading out
+1187      X:0096 X:0096                   DC      'CSW',CLR_SWS                     ; Clear analog switches to reduce power drain
+1188      X:0098 X:0098                   DC      'SOS',SEL_OS                      ; Select Output Source
+1189      X:009A X:009A                   DC      'RCC',READ_CONTROLLER_CONFIGURATION
+1190      X:009C X:009C                   DC      'SSS',SET_SUBARRAY_SIZES
+1191      X:009E X:009E                   DC      'SSP',SET_SUBARRAY_POSITIONS
+1192      X:00A0 X:00A0                   DC      'DON',START                       ; Nothing special
+1193   
+1194      X:00A2 X:00A2                   DC      'OSH',OPEN_SHUTTER
+1195      X:00A4 X:00A4                   DC      'CSH',CLOSE_SHUTTER
+1196      X:00A6 X:00A6                   DC      'PON',PWR_ON                      ; Turn on all camera biases and clocks
+1197      X:00A8 X:00A8                   DC      'POF',PWR_OFF                     ; Turn +/- 15V power supplies off
+1198   
+1199      X:00AA X:00AA                   DC      'SET',SET_EXP_TIME                ; Set exposure time
+1200      X:00AC X:00AC                   DC      'RET',RD_EXP_TIME                 ; Read elapsed exposure time
+1201      X:00AE X:00AE                   DC      'SEX',START_EXPOSURE
+1202      X:00B0 X:00B0                   DC      'PEX',PAUSE_EXPOSURE
+1203      X:00B2 X:00B2                   DC      'REX',RESUME_EXPOSURE
+1204      X:00B4 X:00B4                   DC      'AEX',ABORT_EXPOSURE
+1205      X:00B6 X:00B6                   DC      0,START,0,START,0,START,0,START
+1206      X:00BE X:00BE                   DC      0,START
+1207   
+1208                                      IF      @SCP("HOST","HOST")
+1209      Y:0000 Y:0000                   ORG     Y:0,Y:0                           ; Download address
+1210                                      ELSE
+1212                                      ENDIF
+1213   
+1214      Y:0000 Y:0000         GAIN      DC      0                                 ; Video processor gain and integrator speed
+1215      Y:0001 Y:0001         NSR       DC      2228                              ; Number Serial Read, prescan + image + bias
+1216      Y:0002 Y:0002         NPR       DC      2052                              ; Number Parallel Read of each readout only
+1217      Y:0003 Y:0003         NS_CLR    DC      2250                              ; To clear serial register
+1218      Y:0004 Y:0004         NPCLR     DC      2060                              ; To clear parallel register
+1219      Y:0005 Y:0005         NSBIN     DC      1                                 ; Serial binning parameter
+1220      Y:0006 Y:0006         NPBIN     DC      1                                 ; Parallel binning parameter
+1221   
+1222                            ; Miscellaneous definitions
+1223      Y:0007 Y:0007         TST_DAT   DC      0                                 ; Place for synthetic test image pixel data
+1224      Y:0008 Y:0008         SH_DEL    DC      50                                ; Delay in milliseconds between shutter
+1225                                                                                ;   closing and image readout
+1226      Y:0009 Y:0009         CONFIG    DC      CC                                ; Controller configuration
+1227      Y:000A Y:000A         OS        DC      0                                 ; Output Source selection
+1228      Y:000B Y:000B         N_PAR     DC      10                                ; Delay parameter for parallel clocks
+1229   
+1230                            ; Readout peculiarity parameters. Default values are selected here.
+1231                             SERIAL_SKIP
+1232      Y:000C Y:000C                   DC      SERIAL_SKIP_AR                    ; Serial skipping waveforms
+1233                             SERIAL_READ
+1234      Y:000D Y:000D                   DC      SERIAL_READ_AR                    ; Serial reading table
+1235                             SERIAL_CLOCK
+1236      Y:000E Y:000E                   DC      SERIAL_CLOCK_AR                   ; Serial clocking waveforms
+1237                             PARALLEL_CLOCK
+1238      Y:000F Y:000F                   DC      PARALLEL_LOWER                    ; Parallel waveform table
+1239                             PARALLEL_CLEAR
+1240      Y:0010 Y:0010                   DC      PARALLEL_SPLIT_CLEAR              ;
+1241   
+1242                            ; Parameters computed by this program
+1243                             NSERIALS_READ
+1244      Y:0011 Y:0011                   DC      0                                 ; Number of serials to read
+1245      Y:0012 Y:0012         NSCLR     DC      0                                 ; Number of waveforms
+1246      Y:0013 Y:0013         NSKIP1    DC      0                                 ; Number of waveforms
+1247      Y:0014 Y:0014         NREAD     DC      0                                 ; Number of waveforms
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  tim.s  Page 24
+
+
+
+1248      Y:0015 Y:0015         NSKIP2    DC      0                                 ; Number of waveforms
+1249      Y:0016 Y:0016         NBIAS     DC      0                                 ; Number of waveforms
+1250   
+1251                            ; These three parameters are read from the READ_TABLE when needed by the
+1252                            ;   RDCCD routine as it loops through the required number of boxes
+1253      Y:0017 Y:0017         NP_SKIP   DC      0                                 ; Number of rows to skip
+1254      Y:0018 Y:0018         NS_SKP1   DC      0                                 ; Number of serials to clear before read
+1255      Y:0019 Y:0019         NS_SKP2   DC      0                                 ; Number of serials to clear after read
+1256   
+1257                            ; Subimage readout parameters. Ten subimage boxes maximum.
+1258      Y:001A Y:001A         NBOXES    DC      0                                 ; Number of boxes to read
+1259      Y:001B Y:001B         NR_BIAS   DC      0                                 ; Number of bias pixels to read
+1260      Y:001C Y:001C         NS_READ   DC      0                                 ; Number of columns in subimage read
+1261      Y:001D Y:001D         NP_READ   DC      0                                 ; Number of rows in subimage read
+1262      Y:001E Y:001E         READ_TABLE DC     0,0,0                             ; #1 = Number of rows to clear,
+1263      Y:0021 Y:0021                   DC      0,0,0                             ; #2 = Number of columns to skip before
+1264      Y:0024 Y:0024                   DC      0,0,0                             ;   subimage read
+1265      Y:0027 Y:0027                   DC      0,0,0                             ; #3 = Number of rows to clear after
+1266      Y:002A Y:002A                   DC      0,0,0                             ;   subimage clear
+1267      Y:002D Y:002D                   DC      0,0,0
+1268      Y:0030 Y:0030                   DC      0,0,0
+1269      Y:0033 Y:0033                   DC      0,0,0
+1270      Y:0036 Y:0036                   DC      0,0,0
+1271      Y:0039 Y:0039                   DC      0,0,0
+1272   
+1273                            ; Include the waveform table
+1274                                      INCLUDE "NASAcam.Waveforms.s"             ; e2v CCD42-40 readout waveforms
+1275                                   COMMENT *
+1276   
+1277                            This file contains timing waveforms for the e2v CCD42-40 2048 x 2052 pixel CCD
+1278   
+1279                            This CCD has two outputs, left and right.
+1280   
+1281                            $00F000 Left    A/D #0  Blue  Pin 3   LOIS L
+1282                            $00F021 Right   A/D #1  Red   Pin 10  LOIS R
+1283                            $00F020 Both    A/D #0 and 1
+1284   
+1285                                    *
+1286   
+1287                                      PAGE    132                               ; Printronix page width - 132 columns
+1288   
+1289                            ; Definitions of readout variables
+1290      002000                CLK2      EQU     $002000                           ; Clock driver board lower half
+1291      003000                CLK3      EQU     $003000                           ; Clock driver board lower half
+1292      000000                VIDEO     EQU     $000000                           ; Video processor board switches
+1293      010000                BA_IDLY   EQU     $010000                           ; Ring delay, 100 ns
+1294      010000                BB_IDLY   EQU     $010000                           ; Ring Delay, 100 ns
+1295      8C0000                P_DLY     EQU     $8C0000                           ; Parallel clock delay, 2 us overlaps
+1296      000000                S_DLY     EQU     $000000                           ; Serial delay, 40 ns overlaps
+1297      150000                INT_TIM   EQU     $150000                           ; Dual slope integration time = 500 ns
+1298   
+1299                            ; Define switch state bits for the CCD clocks
+1300                            ; Leave in the vestigial S3R, SWR, RGR, P1L, P2L, P3L to simplify mods to waveforms
+1301                            ; and to make it easier to use in a future CCD that has these signals.
+1302   
+1303                            ; Now for CLK2, which is the lower bank
+1304      000001                S1L       EQU     1                                 ; Serial shift register phase #1, Left
+1305      000002                S2L       EQU     2                                 ; Serial shift register phase #2, Left
+1306      000004                S3L       EQU     4                                 ; Serial shift register phase #3, Left
+1307      000008                S1R       EQU     8                                 ; Serial shift register phase #1, Right
+1308      000010                S2R       EQU     $10                               ; Serial shift register phase #2, Right
+1309      000020                S3R       EQU     $20                               ; Serial shift register phase #3, Right, not con
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  NASAcam.Waveforms.s  Page 25
+
+
+
+nected
+1310      000040                SWL       EQU     $40                               ; Summing well, Left
+1311      000080                SWR       EQU     $80                               ; Summing well, Right, not connected
+1312      000100                RGL       EQU     $100                              ; Reset gate, Left
+1313      000200                RGR       EQU     $200                              ; Reset gate, Right, not connected
+1314   
+1315                            ; CLK3, which is the upper bank
+1316   
+1317      000001                P1U       EQU     1                                 ; Parallel shift register phase #1, Upper
+1318      000002                P2U       EQU     2                                 ; Parallel shift register phase #2, Upper
+1319      000004                P3U       EQU     4                                 ; Parallel shift register phase #3, Upper
+1320      000008                P1L       EQU     8                                 ; Parallel shift register phase #1, Lower, not c
+onnected
+1321      000010                P2L       EQU     $10                               ; Parallel shift register phase #2, Lower, not c
+onnected
+1322      000020                P3L       EQU     $20                               ; Parallel shift register phase #3, Lower, not c
+onnected
+1323      000040                TGU       EQU     $40                               ; Transfer Gate Upper, not connected
+1324      000080                DGH       EQU     $80                               ; Dump Gate
+1325   
+1326                            ; Define the clocking voltages
+1327      3.200000E+000         RG_HI     EQU     +3.2                              ; Real volts
+1328      -8.800000E+000        RG_LO     EQU     -8.8
+1329      2.200000E+000         SW_HI     EQU     +2.2                              ; These voltages based on e2v test data sheet
+1330      -7.800000E+000        SW_LO     EQU     -7.8                              ;
+1331      2.200000E+000         S_HI      EQU     +2.2                              ;
+1332      -7.800000E+000        S_LO      EQU     -7.8                              ;
+1333      3.200000E+000         P_HI      EQU     +3.2                              ;
+1334      -8.800000E+000        P_LO      EQU     -8.8                              ;
+1335      3.200000E+000         DG_HI     EQU     +3.2
+1336      -8.800000E+000        DG_LO     EQU     -8.8
+1337      0.000000E+000         ZERO      EQU     0.0
+1338   
+1339                            ; DC Bias definition - tweak to produce correct volts in service
+1340      2.330000E+001         VOD       EQU     +23.30                            ; Output Drain, real volts - to get 22.2V at the
+ CCD
+1341      1.005000E+001         VRD       EQU     +10.05                            ; Reset Drain - to get 9.2V at the CCD
+1342      -5.850000E+000        VOG1      EQU     -5.85                             ; Output Gate 1 - to get -5.8V
+1343      -4.850000E+000        VOG2      EQU     -4.85                             ; Output Gate 2 - to get -4.8V
+1344      1.565000E+001         VDD       EQU     +15.65                            ; Dump Drain - to get 15.2V
+1345   
+1346                            ; Output offset variables
+1347                            ;OFFSET0                EQU     $8C0 ; Values to use for live CCD gain 2
+1348                            ;OFFSET1                EQU     $8C0 ; Values to use for live CCD gain 2
+1349                            ;OFFSET0         EQU     $A60 ; Values to use for live CCD gain 5
+1350                            ;OFFSET1         EQU     $A60 ; Values to use for live CCD gain 5
+1351      000700                OFFSET0   EQU     $700                              ; Testing Value
+1352      000700                OFFSET1   EQU     $700                              ; Testing Value
+1353      000A00                OFFSET2   EQU     $A00
+1354      000BA0                OFFSET3   EQU     $BA0
+1355   
+1356                            ;  ***  Clock word definitions for Y: memory waveform tables  *****
+1357                            ;       DC      CLK2+S_DLY+S1R+S2R+S3R+S1L+S2L+S3L+SWL+SWR+RGL+RGR
+1358                            ;       DC      CLK3+P_DLY+P1U+P2U+P3U+P1L+P2L+P3L+DGH
+1359                            ; Make sure simultaneous clocking of upper and lower banks is DISABLED
+1360   
+1361                            ; Serial idle in BOTH directions for speed (Serial split)
+1362                            SERIAL_IDLE
+1363      Y:003C Y:003C                   DC      END_SERIAL_IDLE-SERIAL_IDLE-2
+1364      Y:003D Y:003D                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+000+000
+1365      Y:003E Y:003E                   DC      VIDEO+$000000+%1110100            ; Change nearly everything
+1366      Y:003F Y:003F                   DC      CLK2+S_DLY+000+S2R+000+000+S2L+000+000+000+RGL+RGR
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  NASAcam.Waveforms.s  Page 26
+
+
+
+1367      Y:0040 Y:0040                   DC      CLK2+S_DLY+000+S2R+S3R+000+S2L+S3L+SWL+SWR+000+000
+1368      Y:0041 Y:0041                   DC      CLK2+S_DLY+000+000+S3R+000+000+S3L+SWL+SWR+000+000
+1369      Y:0042 Y:0042                   DC      CLK2+S_DLY+S1R+000+S3R+S1L+000+S3L+SWL+SWR+000+000
+1370      Y:0043 Y:0043                   DC      VIDEO+BA_IDLY+%1110111            ; Stop resetting integrator
+1371      Y:0044 Y:0044                   DC      VIDEO+INT_TIM+%0000111            ; Integrate
+1372      Y:0045 Y:0045                   DC      VIDEO+$000000+%0011011            ; Stop Integrate
+1373      Y:0046 Y:0046                   DC      CLK2+S_DLY+S1R+000+000+S1L+000+000+000+000+000+000
+1374      Y:0047 Y:0047                   DC      VIDEO+BB_IDLY+%0011011            ; Delay for signal to settle
+1375      Y:0048 Y:0048                   DC      VIDEO+INT_TIM+%0001011            ; Integrate
+1376      Y:0049 Y:0049                   DC      VIDEO+$000000+%0011011            ; Stop integrate, A/D is sampling
+1377      Y:004A Y:004A                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+000+000
+1378                            END_SERIAL_IDLE
+1379   
+1380                            RESET_NODE
+1381      Y:004B Y:004B                   DC      END_RESET_NODE-RESET_NODE-2
+1382      Y:004C Y:004C                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+RGL+RGR
+1383      Y:004D Y:004D                   DC      VIDEO+$000000+%1110100            ; Change nearly everything
+1384                            END_RESET_NODE
+1385   
+1386                            SERIAL_CLOCK_ALL                                    ; Both amplifiers
+1387      Y:004E Y:004E                   DC      END_SERIAL_CLOCK_ALL-SERIAL_CLOCK_ALL-2
+1388      Y:004F Y:004F                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+SWL+SWR+000+000
+1389      Y:0050 Y:0050                   DC      CLK2+S_DLY+000+S2R+000+000+S2L+000+SWL+SWR+000+000
+1390      Y:0051 Y:0051                   DC      CLK2+S_DLY+000+S2R+S3R+000+S2L+S3L+SWL+SWR+000+000
+1391      Y:0052 Y:0052                   DC      CLK2+S_DLY+000+000+S3R+000+000+S3L+SWL+SWR+000+000
+1392      Y:0053 Y:0053                   DC      CLK2+S_DLY+S1R+000+S3R+S1L+000+S3L+SWL+SWR+000+000
+1393      Y:0054 Y:0054                   DC      CLK2+S_DLY+S1R+000+000+S1L+000+000+SWL+SWR+000+000
+1394                            END_SERIAL_CLOCK_ALL
+1395   
+1396                            SERIAL_CLOCK_AR                                     ; Serial right, Swap S1L and S2L
+1397      Y:0055 Y:0055                   DC      END_SERIAL_CLOCK_AR-SERIAL_CLOCK_AR-2
+1398      Y:0056 Y:0056                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+SWL+SWR+000+000
+1399      Y:0057 Y:0057                   DC      CLK2+S_DLY+000+S2R+000+S1L+000+000+SWL+SWR+000+000
+1400      Y:0058 Y:0058                   DC      CLK2+S_DLY+000+S2R+S3R+S1L+000+S3L+SWL+SWR+000+000
+1401      Y:0059 Y:0059                   DC      CLK2+S_DLY+000+000+S3R+000+000+S3L+SWL+SWR+000+000
+1402      Y:005A Y:005A                   DC      CLK2+S_DLY+S1R+000+S3R+000+S2L+S3L+SWL+SWR+000+000
+1403      Y:005B Y:005B                   DC      CLK2+S_DLY+S1R+000+000+000+S2L+000+SWL+SWR+000+000
+1404                            END_SERIAL_CLOCK_AR
+1405   
+1406                            SERIAL_CLOCK_AL                                     ; Serial left, Swap S1R and S2R
+1407      Y:005C Y:005C                   DC      END_SERIAL_CLOCK_AL-SERIAL_CLOCK_AL-2
+1408      Y:005D Y:005D                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+SWL+SWR+000+000
+1409      Y:005E Y:005E                   DC      CLK2+S_DLY+S1R+000+000+000+S2L+000+SWL+SWR+000+000
+1410      Y:005F Y:005F                   DC      CLK2+S_DLY+S1R+000+S3R+000+S2L+S3L+SWL+SWR+000+000
+1411      Y:0060 Y:0060                   DC      CLK2+S_DLY+000+000+S3R+000+000+S3L+SWL+SWR+000+000
+1412      Y:0061 Y:0061                   DC      CLK2+S_DLY+000+S2R+S3R+S1L+000+S3L+SWL+SWR+000+000
+1413      Y:0062 Y:0062                   DC      CLK2+S_DLY+000+S2R+000+S1L+000+000+SWL+SWR+000+000
+1414                            END_SERIAL_CLOCK_AL
+1415   
+1416                            SERIAL_CLEAR
+1417      Y:0063 Y:0063                   DC      END_SERIAL_CLEAR-SERIAL_CLEAR-2
+1418      Y:0064 Y:0064                   DC      CLK2+S_DLY+000+S2R+000+000+S2L+000+000+000+RGL+RGR
+1419      Y:0065 Y:0065                   DC      CLK2+S_DLY+000+S2R+S3R+000+S2L+S3L+SWL+SWR+000+000
+1420      Y:0066 Y:0066                   DC      CLK2+S_DLY+000+000+S3R+000+000+S3L+SWL+SWR+000+000
+1421      Y:0067 Y:0067                   DC      CLK2+S_DLY+S1R+000+S3R+S1L+000+S3L+SWL+SWR+000+000
+1422      Y:0068 Y:0068                   DC      CLK2+S_DLY+S1R+000+000+S1L+000+000+000+000+000+000
+1423      Y:0069 Y:0069                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+000+000
+1424                            END_SERIAL_CLEAR
+1425   
+1426                            VIDEO_PROCESS
+1427      Y:006A Y:006A                   DC      END_VIDEO_PROCESS-VIDEO_PROCESS-2
+1428                            SXMIT_VIDEO_PROCESS
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  NASAcam.Waveforms.s  Page 27
+
+
+
+1429      Y:006B Y:006B                   DC      $00F021                           ; Transmit A/D #0 data to host
+1430      Y:006C Y:006C                   DC      VIDEO+BA_IDLY+%1110111            ; Stop resetting integrator
+1431      Y:006D Y:006D                   DC      VIDEO+INT_TIM+%0000111            ; Integrate
+1432      Y:006E Y:006E                   DC      VIDEO+$000000+%0011011            ; Stop Integrate
+1433                            CCLK_1                                              ; The following line is overwritten by timmisc.s
+1434      Y:006F Y:006F                   DC      CLK2+S_DLY+S3R+000+000+S3L+000+000+000+000+000+000
+1435      Y:0070 Y:0070                   DC      VIDEO+BB_IDLY+%0011011            ; Delay for signal to settle
+1436      Y:0071 Y:0071                   DC      VIDEO+INT_TIM+%0001011            ; Integrate
+1437      Y:0072 Y:0072                   DC      VIDEO+$000000+%0011011            ; Stop integrate, A/D is sampling
+1438                            CCLK_2                                              ; The following line is overwritten by timmisc.s
+, but is correct as is.
+1439      Y:0073 Y:0073                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+000+000
+1440                            END_VIDEO_PROCESS
+1441   
+1442                            ; Starting Y: address of circular waveforms for no-overhead access
+1443      0000A0                STRT_CIR  EQU     $A0
+1444      000430                ROM_DISP  EQU     APL_NUM*N_W_APL+APL_LEN+MISC_LEN+COM_LEN+STRT_CIR
+1445      000490                DAC_DISP  EQU     APL_NUM*N_W_APL+APL_LEN+MISC_LEN+COM_LEN+$100
+1446   
+1447                            ; Check for Y: data memory overflow
+1448                                      IF      @CVS(N,*)>STRT_CIR
+1450                                      ENDIF                                     ;  will not overflow
+1451   
+1452                            ; The fast serial code with the circulating address register must start
+1453                            ;   on a boundary that is a multiple of the address register modulus.
+1454   
+1455                                      IF      @SCP("HOST","HOST")
+1456      Y:00A0 Y:00A0                   ORG     Y:STRT_CIR,Y:STRT_CIR             ; Download address
+1457                                      ELSE
+1459                                      ENDIF
+1460   
+1461                            ; Fast Serials readout for single amplifier readout through the left corner
+1462                            ;    xfer, A/D, integ, Pol+, Pol-, DCclamp, rst  (1 => switch open)
+1463                            SERIAL_READ_AR                                      ; Read from R amp, swap S1L and S2L
+1464      Y:00A0 Y:00A0                   DC      CLK2+S_DLY+000+S2R+000+000+S1L+000+000+000+RGL+RGR
+1465      Y:00A1 Y:00A1                   DC      VIDEO+$000000+%1110100            ; Change nearly everything
+1466      Y:00A2 Y:00A2                   DC      CLK2+S_DLY+000+S2R+S3R+000+S1L+S3L+SWL+SWR+000+000
+1467      Y:00A3 Y:00A3                   DC      CLK2+S_DLY+000+000+S3R+000+000+S3L+SWL+SWR+000+000
+1468      Y:00A4 Y:00A4                   DC      CLK2+S_DLY+S1R+000+S3R+S2L+000+S3L+SWL+SWR+000+000
+1469                            SXMIT_AR
+1470      Y:00A5 Y:00A5                   DC      $00F021                           ; Transmit A/D #1 data to host
+1471      Y:00A6 Y:00A6                   DC      VIDEO+BA_IDLY+%1110111            ; Stop resetting integrator
+1472      Y:00A7 Y:00A7                   DC      VIDEO+INT_TIM+%0000111            ; Integrate
+1473      Y:00A8 Y:00A8                   DC      VIDEO+$000000+%0011011            ; Stop Integrate
+1474      Y:00A9 Y:00A9         RCLK_1    DC      CLK2+S_DLY+S1R+000+000+S2L+000+000+000+000+000+000
+1475      Y:00AA Y:00AA                   DC      VIDEO+BB_IDLY+%0011011            ; Delay for signal to settle
+1476      Y:00AB Y:00AB                   DC      VIDEO+INT_TIM+%0001011            ; Integrate
+1477      Y:00AC Y:00AC                   DC      VIDEO+$000000+%0011011            ; Stop integrate, A/D is sampling
+1478      Y:00AD Y:00AD         RCLK_2    DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+000+000
+1479                            END_SERIAL_READ_AR
+1480   
+1481                                      IF      @SCP("HOST","HOST")
+1482      Y:00B0 Y:00B0                   ORG     Y:STRT_CIR+$10,Y:STRT_CIR+$10     ; Download address
+1483                                      ELSE
+1485                                      ENDIF
+1486   
+1487                            SERIAL_READ_AL                                      ; Read from L amp, swap S1R and S2R
+1488      Y:00B0 Y:00B0                   DC      CLK2+S_DLY+S1R+000+000+000+S2L+000+000+000+RGL+RGR
+1489      Y:00B1 Y:00B1                   DC      VIDEO+$000000+%1110100            ;Change nearly everything
+1490      Y:00B2 Y:00B2                   DC      CLK2+S_DLY+S1R+000+S3R+000+S2L+S3L+SWL+SWR+000+000
+1491      Y:00B3 Y:00B3                   DC      CLK2+S_DLY+000+000+S3R+000+000+S3L+SWL+SWR+000+000
+1492      Y:00B4 Y:00B4                   DC      CLK2+S_DLY+000+S2R+S3R+S1L+000+S3L+SWL+SWR+000+000
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  NASAcam.Waveforms.s  Page 28
+
+
+
+1493                            SXMIT_AL
+1494      Y:00B5 Y:00B5                   DC      $00F000                           ; Transmit A/D #0 data to host
+1495      Y:00B6 Y:00B6                   DC      VIDEO+BA_IDLY+%1110111            ; Stop resetting integrator
+1496      Y:00B7 Y:00B7                   DC      VIDEO+INT_TIM+%0000111            ; Integrate
+1497      Y:00B8 Y:00B8                   DC      VIDEO+$000000+%0011011            ; Stop Integrate
+1498      Y:00B9 Y:00B9                   DC      CLK2+S_DLY+000+S2R+000+S1L+000+000+000+000+000+000
+1499      Y:00BA Y:00BA                   DC      VIDEO+BB_IDLY+%0011011            ; Delay for signal to settle
+1500      Y:00BB Y:00BB                   DC      VIDEO+INT_TIM+%0001011            ; Integrate
+1501      Y:00BC Y:00BC                   DC      VIDEO+$000000+%0011011            ; Stop integrate, A/D is sampling
+1502      Y:00BD Y:00BD                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+000+000
+1503                            END_SERIAL_READ_AL
+1504   
+1505                                      IF      @SCP("HOST","HOST")
+1506      Y:00C0 Y:00C0                   ORG     Y:STRT_CIR+$20,Y:STRT_CIR+$20     ; Download address
+1507                                      ELSE
+1509                                      ENDIF
+1510   
+1511                            SERIAL_READ_ALL
+1512      Y:00C0 Y:00C0                   DC      CLK2+S_DLY+000+S2R+000+000+S2L+000+000+000+RGL+RGR
+1513      Y:00C1 Y:00C1                   DC      VIDEO+$000000+%1110100            ; Change nearly everything
+1514      Y:00C2 Y:00C2                   DC      CLK2+S_DLY+000+S2R+S3R+000+S2L+S3L+SWL+SWR+000+000
+1515      Y:00C3 Y:00C3                   DC      CLK2+S_DLY+000+000+S3R+000+000+S3L+SWL+SWR+000+000
+1516      Y:00C4 Y:00C4                   DC      CLK2+S_DLY+S1R+000+S3R+S1L+000+S3L+SWL+SWR+000+000
+1517                            SXMIT_ALL
+1518      Y:00C5 Y:00C5                   DC      $00F020                           ; Transmit A/D #0 & #1 data to host
+1519      Y:00C6 Y:00C6                   DC      VIDEO+BA_IDLY+%1110111            ; Stop resetting integrator
+1520      Y:00C7 Y:00C7                   DC      VIDEO+INT_TIM+%0000111            ; Integrate
+1521      Y:00C8 Y:00C8                   DC      VIDEO+$000000+%0011011            ; Stop Integrate
+1522      Y:00C9 Y:00C9                   DC      CLK2+S_DLY+S1R+000+000+S1L+000+000+000+000+000+000
+1523      Y:00CA Y:00CA                   DC      VIDEO+BB_IDLY+%0011011            ; Delay for signal to settle
+1524      Y:00CB Y:00CB                   DC      VIDEO+INT_TIM+%0001011            ; Integrate
+1525      Y:00CC Y:00CC                   DC      VIDEO+$000000+%0011011            ; Stop integrate, A/D is sampling
+1526      Y:00CD Y:00CD                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+000+000
+1527                            END_SERIAL_READ_ALL
+1528   
+1529                                      IF      @SCP("HOST","HOST")
+1530      Y:00D0 Y:00D0                   ORG     Y:STRT_CIR+$30,Y:STRT_CIR+$30     ; Download address
+1531                                      ELSE
+1533                                      ENDIF
+1534   
+1535                                                                                ; These are the three skipping tables. Make sure
+ they're all the same
+1536                            SERIAL_SKIP_CLOCKS                                  ; Serial clocking waveform for skipping All
+1537      Y:00D0 Y:00D0                   DC      END_SERIAL_SKIP_CLOCKS-SERIAL_SKIP_CLOCKS-2
+1538      Y:00D1 Y:00D1                   DC      CLK2+S_DLY+000+S2R+000+000+S2L+000+000+000+RGL+RGR
+1539      Y:00D2 Y:00D2                   DC      CLK2+S_DLY+000+S2R+S3R+000+S2L+S3L+SWL+SWR+000+000
+1540      Y:00D3 Y:00D3                   DC      CLK2+S_DLY+000+000+S3R+000+000+S3L+SWL+SWR+000+000
+1541      Y:00D4 Y:00D4                   DC      CLK2+S_DLY+S1R+000+S3R+S2L+000+S3L+SWL+SWR+000+000
+1542      Y:00D5 Y:00D5                   DC      CLK2+S_DLY+S1R+000+000+S2L+000+000+000+000+000+000
+1543      Y:00D6 Y:00D6                   DC      CLK2+S_DLY+S1R+S2R+000+S2L+S1L+000+000+000+000+000
+1544                            END_SERIAL_SKIP_CLOCKS
+1545   
+1546                                      IF      @SCP("HOST","HOST")
+1547      Y:00E0 Y:00E0                   ORG     Y:STRT_CIR+$40,Y:STRT_CIR+$40     ; Download address
+1548                                      ELSE
+1550                                      ENDIF
+1551   
+1552                            SERIAL_SKIP_AL                                      ; Serial skip to Left amp, reverse S1R & S2R
+1553      Y:00E0 Y:00E0                   DC      END_SERIAL_SKIP_AL-SERIAL_SKIP_AL-2
+1554      Y:00E1 Y:00E1                   DC      CLK2+S_DLY+S1R+000+000+000+S2L+000+000+000+RGL+RGR
+1555      Y:00E2 Y:00E2                   DC      CLK2+S_DLY+S1R+000+S3R+000+S2L+S3L+SWL+SWR+000+000
+1556      Y:00E3 Y:00E3                   DC      CLK2+S_DLY+000+000+S3R+000+000+S3L+SWL+SWR+000+000
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  NASAcam.Waveforms.s  Page 29
+
+
+
+1557      Y:00E4 Y:00E4                   DC      CLK2+S_DLY+000+S2R+S3R+S1L+000+S3L+SWL+SWR+000+000
+1558      Y:00E5 Y:00E5                   DC      CLK2+S_DLY+000+S2R+000+S1L+000+000+000+000+000+000
+1559      Y:00E6 Y:00E6                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+000+000
+1560                            END_SERIAL_SKIP_AL
+1561   
+1562   
+1563                                      IF      @SCP("HOST","HOST")
+1564      Y:00F0 Y:00F0                   ORG     Y:STRT_CIR+$50,Y:STRT_CIR+$50     ; Download address
+1565                                      ELSE
+1567                                      ENDIF
+1568   
+1569   
+1570   
+1571                            SERIAL_SKIP_AR                                      ; Serial skip to right amp, reverse S1L & S2L
+1572      Y:00F0 Y:00F0                   DC      END_SERIAL_SKIP_AR-SERIAL_SKIP_AR-2
+1573      Y:00F1 Y:00F1                   DC      CLK2+S_DLY+000+S2R+000+S1L+000+000+000+000+RGL+RGR
+1574      Y:00F2 Y:00F2                   DC      CLK2+S_DLY+000+S2R+S3R+S1L+000+S3L+SWL+SWR+000+000
+1575      Y:00F3 Y:00F3                   DC      CLK2+S_DLY+000+000+S3R+000+000+S3L+SWL+SWR+000+000
+1576      Y:00F4 Y:00F4                   DC      CLK2+S_DLY+S1R+000+S3R+000+S2L+S3L+SWL+SWR+000+000
+1577      Y:00F5 Y:00F5                   DC      CLK2+S_DLY+S1R+000+000+000+S2L+000+000+000+000+000
+1578      Y:00F6 Y:00F6                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+000+000
+1579                            END_SERIAL_SKIP_AR
+1580   
+1581   
+1582   
+1583                            ; Put all the following code in SRAM.
+1584                                      IF      @SCP("HOST","HOST")
+1585      Y:0100 Y:0100                   ORG     Y:$100,Y:$100                     ; Download address
+1586                                      ELSE
+1588                                      ENDIF
+1589   
+1590                            PARALLEL_LOWER
+1591      Y:0100 Y:0100                   DC      END_PARALLEL_LOWER-PARALLEL_LOWER-2 ; 3 -> 1 -> 2 -> 3;2 -> TG
+1592      Y:0101 Y:0101                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+RGL+RGR
+1593      Y:0102 Y:0102                   DC      CLK3+P_DLY+000+000+P2L+P2U+000+000+000
+1594      Y:0103 Y:0103                   DC      CLK3+P_DLY+000+000+P2L+P2U+P3L+P3U+000
+1595      Y:0104 Y:0104                   DC      CLK3+P_DLY+000+000+000+000+P3L+P3U+000
+1596      Y:0105 Y:0105                   DC      CLK3+P_DLY+P1L+P1U+000+000+P3L+P3U+000
+1597      Y:0106 Y:0106                   DC      CLK3+P_DLY+P1L+P1U+000+000+000+000+000
+1598      Y:0107 Y:0107                   DC      CLK3+P_DLY+P1L+P1U+P2L+P2U+000+000+000
+1599      Y:0108 Y:0108                   DC      CLK3+P_DLY+000+000+P2L+P2U+000+000+000
+1600      Y:0109 Y:0109                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+000+000
+1601                            END_PARALLEL_LOWER
+1602   
+1603                            ; Define a faster delay time for flush (clear) mode, and do it in split mode
+1604                            PARALLEL_SPLIT_CLEAR
+1605      Y:010A Y:010A                   DC      END_PARALLEL_SPLIT_CLEAR-PARALLEL_SPLIT_CLEAR-2
+1606      Y:010B Y:010B                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+RGL+RGR
+1607      Y:010C Y:010C                   DC      CLK3+P_DLY+000+000+P2L+P2U+000+000+000
+1608      Y:010D Y:010D                   DC      CLK3+P_DLY+000+000+P2L+P2U+P3L+P3U+000
+1609      Y:010E Y:010E                   DC      CLK3+P_DLY+000+000+000+000+P3L+P3U+000
+1610      Y:010F Y:010F                   DC      CLK3+P_DLY+P1L+P1U+000+000+P3L+P3U+000
+1611      Y:0110 Y:0110                   DC      CLK3+P_DLY+P1L+P1U+000+000+000+000+000
+1612      Y:0111 Y:0111                   DC      CLK3+P_DLY+P1L+P1U+P2L+P2U+000+000+000
+1613      Y:0112 Y:0112                   DC      CLK3+P_DLY+000+000+P2L+P2U+000+000+DGH
+1614      Y:0113 Y:0113                   DC      CLK2+S_DLY+000+000+000+000+000+000+000+000+RGL+RGR
+1615      Y:0114 Y:0114                   DC      CLK3+P_DLY+000+000+P2L+P2U+000+000+DGH
+1616      Y:0115 Y:0115                   DC      CLK3+P_DLY+000+000+P2L+P2U+000+000+000
+1617      Y:0116 Y:0116                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+RGL+RGR
+1618      Y:0117 Y:0117                   DC      CLK2+S_DLY+S1R+S2R+000+S1L+S2L+000+000+000+000+000
+1619                            END_PARALLEL_SPLIT_CLEAR
+1620                            ; Initialization of clock driver and video processor DACs and switches
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  NASAcam.Waveforms.s  Page 30
+
+
+
+1621      Y:0118 Y:0118         DACS      DC      END_DACS-DACS-1
+1622      Y:0119 Y:0119                   DC      (CLK2<<8)+(0<<14)+@CVI((S_HI+10.0)/20.0*4095) ; #1, Serial Phase 1L
+1623      Y:011A Y:011A                   DC      (CLK2<<8)+(1<<14)+@CVI((S_LO+10.0)/20.0*4095)
+1624      Y:011B Y:011B                   DC      (CLK2<<8)+(2<<14)+@CVI((S_HI+10.0)/20.0*4095) ; #2, Serial Phase 2L
+1625      Y:011C Y:011C                   DC      (CLK2<<8)+(3<<14)+@CVI((S_LO+10.0)/20.0*4095)
+1626      Y:011D Y:011D                   DC      (CLK2<<8)+(4<<14)+@CVI((S_HI+10.0)/20.0*4095) ; #3, Serial Phase 3L
+1627      Y:011E Y:011E                   DC      (CLK2<<8)+(5<<14)+@CVI((S_LO+10.0)/20.0*4095)
+1628      Y:011F Y:011F                   DC      (CLK2<<8)+(6<<14)+@CVI((S_HI+10.0)/20.0*4095) ; #4, Serial Phase 1R
+1629      Y:0120 Y:0120                   DC      (CLK2<<8)+(7<<14)+@CVI((S_LO+10.0)/20.0*4095)
+1630      Y:0121 Y:0121                   DC      (CLK2<<8)+(8<<14)+@CVI((S_HI+10.0)/20.0*4095) ; #5, Serial Phase 2R
+1631      Y:0122 Y:0122                   DC      (CLK2<<8)+(9<<14)+@CVI((S_LO+10.0)/20.0*4095)
+1632      Y:0123 Y:0123                   DC      (CLK2<<8)+(10<<14)+@CVI((ZERO+10.0)/20.0*4095) ; #6, Not Connected
+1633      Y:0124 Y:0124                   DC      (CLK2<<8)+(11<<14)+@CVI((ZERO+10.0)/20.0*4095)
+1634      Y:0125 Y:0125                   DC      (CLK2<<8)+(12<<14)+@CVI((SW_HI+10.0)/20.0*4095) ; #7, Summing Well
+1635      Y:0126 Y:0126                   DC      (CLK2<<8)+(13<<14)+@CVI((SW_LO+10.0)/20.0*4095)
+1636      Y:0127 Y:0127                   DC      (CLK2<<8)+(14<<14)+@CVI((ZERO+10.0)/20.0*4095) ; #8, Not Connected
+1637      Y:0128 Y:0128                   DC      (CLK2<<8)+(15<<14)+@CVI((ZERO+10.0)/20.0*4095)
+1638      Y:0129 Y:0129                   DC      (CLK2<<8)+(16<<14)+@CVI((RG_HI+10.0)/20.0*4095) ; #9, Reset Gate
+1639      Y:012A Y:012A                   DC      (CLK2<<8)+(17<<14)+@CVI((RG_LO+10.0)/20.0*4095)
+1640      Y:012B Y:012B                   DC      (CLK2<<8)+(18<<14)+@CVI((ZERO+10.0)/20.0*4095) ; #10, Not Connected
+1641      Y:012C Y:012C                   DC      (CLK2<<8)+(19<<14)+@CVI((ZERO+10.0)/20.0*4095)
+1642      Y:012D Y:012D                   DC      (CLK2<<8)+(20<<14)+@CVI((ZERO+10.0)/20.0*4095) ; #11, Not Connected
+1643      Y:012E Y:012E                   DC      (CLK2<<8)+(21<<14)+@CVI((ZERO+10.0)/20.0*4095)
+1644      Y:012F Y:012F                   DC      (CLK2<<8)+(22<<14)+@CVI((ZERO+10.0)/20.0*4095) ; #12, Not Connected
+1645      Y:0130 Y:0130                   DC      (CLK2<<8)+(23<<14)+@CVI((ZERO+10.0)/20.0*4095)
+1646   
+1647                            ; These are the same definitions except for the upper half of the CCD
+1648      Y:0131 Y:0131                   DC      (CLK2<<8)+(24<<14)+@CVI((P_HI+10.0)/20.0*4095) ; #13, Parallel #1
+1649      Y:0132 Y:0132                   DC      (CLK2<<8)+(25<<14)+@CVI((P_LO+10.0)/20.0*4095)
+1650      Y:0133 Y:0133                   DC      (CLK2<<8)+(26<<14)+@CVI((P_HI+10.0)/20.0*4095) ; #14, Parallel #2
+1651      Y:0134 Y:0134                   DC      (CLK2<<8)+(27<<14)+@CVI((P_LO+10.0)/20.0*4095)
+1652      Y:0135 Y:0135                   DC      (CLK2<<8)+(28<<14)+@CVI((P_HI+10.0)/20.0*4095) ; #15, Parallel #3
+1653      Y:0136 Y:0136                   DC      (CLK2<<8)+(29<<14)+@CVI((P_LO+10.0)/20.0*4095)
+1654      Y:0137 Y:0137                   DC      (CLK2<<8)+(30<<14)+@CVI((ZERO+10.0)/20.0*4095) ; #16, Not Connected
+1655      Y:0138 Y:0138                   DC      (CLK2<<8)+(31<<14)+@CVI((ZERO+10.0)/20.0*4095)
+1656      Y:0139 Y:0139                   DC      (CLK2<<8)+(32<<14)+@CVI((ZERO+10.0)/20.0*4095) ; #17, Not Connected
+1657      Y:013A Y:013A                   DC      (CLK2<<8)+(33<<14)+@CVI((ZERO+10.0)/20.0*4095)
+1658      Y:013B Y:013B                   DC      (CLK2<<8)+(34<<14)+@CVI((ZERO+10.0)/20.0*4095) ; #18, Not Connected
+1659      Y:013C Y:013C                   DC      (CLK2<<8)+(35<<14)+@CVI((ZERO+10.0)/20.0*4095)
+1660      Y:013D Y:013D                   DC      (CLK2<<8)+(36<<14)+@CVI((ZERO+10.0)/20.0*4095) ; #19, Not Connected
+1661      Y:013E Y:013E                   DC      (CLK2<<8)+(37<<14)+@CVI((ZERO+10.0)/20.0*4095)
+1662      Y:013F Y:013F                   DC      (CLK2<<8)+(38<<14)+@CVI((DG_HI+10.0)/20.0*4095) ; #33, Dump Gate
+1663      Y:0140 Y:0140                   DC      (CLK2<<8)+(39<<14)+@CVI((DG_LO+10.0)/20.0*4095)
+1664      Y:0141 Y:0141                   DC      (CLK2<<8)+(40<<14)+@CVI((ZERO+10.0)/20.0*4095) ; #34, Not Connected
+1665      Y:0142 Y:0142                   DC      (CLK2<<8)+(41<<14)+@CVI((ZERO+10.0)/20.0*4095)
+1666      Y:0143 Y:0143                   DC      (CLK2<<8)+(42<<14)+@CVI((ZERO+10.0)/20.0*4095) ; #35, Not Connected
+1667      Y:0144 Y:0144                   DC      (CLK2<<8)+(43<<14)+@CVI((ZERO+10.0)/20.0*4095)
+1668      Y:0145 Y:0145                   DC      (CLK2<<8)+(44<<14)+@CVI((ZERO+10.0)/20.0*4095) ; #36, Not Connected
+1669      Y:0146 Y:0146                   DC      (CLK2<<8)+(45<<14)+@CVI((ZERO+10.0)/20.0*4095)
+1670      Y:0147 Y:0147                   DC      (CLK2<<8)+(46<<14)+@CVI((ZERO+10.0)/20.0*4095) ; #37, Not Connected
+1671      Y:0148 Y:0148                   DC      (CLK2<<8)+(47<<14)+@CVI((ZERO+10.0)/20.0*4095)
+1672   
+1673                            ; Set gain and integrator speed. x2 gain, fast integrate
+1674      Y:0149 Y:0149                   DC      $0c3fbb
+1675      Y:014A Y:014A                   DC      $1c3fbb
+1676   
+1677                            ;       DC      $0c3f77                 ; x1    Gain, fast integrate
+1678                            ;       DC      $0c3fbb                 ; x2    Gain, fast integrate
+1679                            ;       DC      $0c3fdd                 ; x4.75 Gain, fast integrate
+1680                            ;       DC      $0c3fee                 ; x9    Gain, fast integrate
+1681   
+1682                            ; Input offset voltages for DC coupling. Target is U4#6 = 24 volts
+Motorola DSP56000 Assembler  Version 6.2.0   107-03-22  14:42:49  NASAcam.Waveforms.s  Page 31
+
+
+
+1683      Y:014B Y:014B                   DC      $0c0800                           ; Input offset, Left
+1684      Y:014C Y:014C                   DC      $0c8800                           ; Input offset, Right
+1685      Y:014D Y:014D                   DC      $1c0800                           ; Input offset, Left
+1686      Y:014E Y:014E                   DC      $1c8800                           ; Input offset, Right
+1687   
+1688                            ; Output offset voltages to get about 1000 A/D units
+1689      Y:014F Y:014F                   DC      $0c4000+OFFSET0                   ; Output video offset, Left
+1690      Y:0150 Y:0150                   DC      $0cc000+OFFSET1                   ; Output video offset, Right
+1691                            ;       DC      $1c4000+OFFSET2         ; Output video offset, Left
+1692                            ;       DC      $1cc000+OFFSET3         ; Output video offset, Right
+1693   
+1694                            ; Various gate voltages, video board #0
+1695      Y:0151 Y:0151                   DC      $0d0000+@CVI((VOD-7.5)/22.5*4095) ; Vod Output Drain, Left, pin #1
+1696      Y:0152 Y:0152                   DC      $0d4000+@CVI((VOD-7.5)/22.5*4095) ; Vod Output Drain, Right, pin #2
+1697      Y:0153 Y:0153                   DC      $0d8000+@CVI((VRD-5.0)/15.0*4095) ; Vrd Reset Drain, Left, pin #3
+1698      Y:0154 Y:0154                   DC      $0dc000+@CVI((VRD-5.0)/15.0*4095) ; Vrd Reset Drain, Right, pin #4
+1699      Y:0155 Y:0155                   DC      $0e0000+@CVI((VDD-5.0)/15.0*4095) ; VDD Dump Drain, pin #5
+1700   
+1701      Y:0156 Y:0156                   DC      $0f0000+@CVI((ZERO+5.0)/10.0*4095) ; Not connected, pin #9
+1702      Y:0157 Y:0157                   DC      $0f4000+@CVI((ZERO+5.0)/10.0*4095) ; Not connected, pin #10
+1703      Y:0158 Y:0158                   DC      $0f8000+@CVI((VOG1+10.0)/20.0*4095) ; Output Gate 1, pin #11
+1704      Y:0159 Y:0159                   DC      $0fc000+@CVI((VOG2+10.0)/20.0*4095) ; Output Gate 2, pin #12
+1705   
+1706   
+1707                            END_DACS
+1708   
+1709                            ; Check for overflow in the EEPROM case
+1710                                      IF      @SCP("HOST","EEPROM")
+1714                                      ENDIF
+1715   
+1716   
+1717                               ENDSEC                                    ; End of section TIM
+1718   
+1719                     ;  End of program
+1720                               END
+
+0    Errors
+0    Warnings
+
+
