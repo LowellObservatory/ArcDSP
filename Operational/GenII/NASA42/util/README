@@ -1,0 +1,3 @@
+This directory includes both timing and utility DSP.  The Makefile deals 
+with both of them.  This utility code doesn't include the temperature
+meta-regulation loop.
