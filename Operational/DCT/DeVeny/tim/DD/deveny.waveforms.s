@@ -1,0 +1,1021 @@
+; Waveform tables and definitions for the e2v CCD42-10 2Kx512 DD CCD for DeVeny
+; Based on DSP for LMI.  The boards in the two controllers are the same.
+
+; CCD clock voltage definitions
+VIDEO		EQU	$000000	; Video processor board select = 0
+CLK2		EQU	$002000	; Clock driver board select = 2
+CLK3		EQU	$003000	; Clock driver board select = 3 
+CLKV            EQU     $200000 ; Clock driver board DAC voltage selection address 
+VID0            EQU     $000000 ; Address of video board DACS
+DAC_ADDR        EQU     $0E0000 ; DAC Channel Address
+DAC_RegM        EQU     $0F4000 ; DAC m Register
+DAC_RegC        EQU     $0F8000 ; DAC c Register
+DAC_RegD        EQU     $0FC000 ; DAC X1 Register
+Vmax            EQU     13.0    ; Maximum clock driver voltage
+ZERO            EQU      0.0    ; Unused pins
+
+
+; For NASA42 we uncommented one of these lines at a time
+;INT_TIM	EQU	$080000	; 1.0 us/px - use gain 9.5, clips at PRAM
+;INT_TIM	EQU	$130000	; 1.4 us/px - use gain 4.75, clips at PRAM
+;INT_TIM		EQU	$1D0000	; 1.8 us/px - use gain 2
+;INT_TIM	EQU	$2D0000	; 2.5 us/px - use gain 2, doesn't clip
+;INT_TIM	EQU	$600000	; 4.7 us/px - use gain 1; Doesn't clip
+
+; INT_TIM, controlled by Makefile def'n INTTIM_SETTING
+; as per Confluence July 1 2010 end commentary
+
+        IF      @SCP("INTTIM_SETTING","08")
+; on nasa42, 1.0 us/pxl- using gain 9.5, clips at PRAM
+INT_TIM         EQU     $080000
+        ENDIF
+        IF      @SCP("INTTIM_SETTING","13")
+; on nasa42, 1.4 us/pxl- using gain 4.75, clips at PRAM
+INT_TIM         EQU     $130000
+        ENDIF
+        IF      @SCP("INTTIM_SETTING","1D")
+; on nasa42, 1.8 us/pxl- use gain 2
+; this is in production at the 42"
+INT_TIM         EQU     $1D0000
+        ENDIF
+        IF      @SCP("INTTIM_SETTING","2D")
+; on nasa42, 2.5 us/pxl- use gain 2, doesn't clip.
+; Good starting point for the Gen III DeVeny.
+INT_TIM         EQU     $2D0000
+        ENDIF
+        IF      @SCP("INTTIM_SETTING","E")
+; on limi, 2.5 us/pxl
+INT_TIM         EQU     $0E0000
+        ENDIF
+        IF      @SCP("INTTIM_SETTING","52")
+; Gen III DeVeny to match full well to ADC.
+INT_TIM         EQU     $520000
+        ENDIF
+        IF      @SCP("INTTIM_SETTING","60")
+; on nasa42, 4.7 us/pxl- use gain 1, doesn't clip
+INT_TIM         EQU     $600000
+        ENDIF
+
+
+;ADC_TIM		EQU	$0C0000	; Slow ADC TIME
+ADC_TIM		EQU	$000000 ; Fast ADC TIME
+
+
+; Delay numbers in clocking
+;SI_DELAY	EQU	$A70000 ; 25 microsecond parallel delay time
+
+; SI_DELAY, controlled by Makefile def'n SIDELAY_SETTING
+; as per Confluence July 1 2010 end commentary
+        IF      @SCP("SIDELAY_SETTING","88")
+; 5 us parallel delay time
+SI_DELAY        EQU     $880000 ; Fast Storage/Image Delay
+        ENDIF
+        IF      @SCP("SIDELAY_SETTING","A7")
+; 25 us parallel delay time
+SI_DELAY	EQU	$A70000 ; 25 microsecond parallel delay time
+	ENDIF
+
+
+DG_DELAY	EQU	$880000 ; 25 microsecond dump gate delay time
+; 
+;R_DELAY		EQU	$060000	; Fast serial regisiter transfer delay.  Set to $0x060000.
+
+; R_DELAY, controlled by Makefile def'n RDELAY_SETTING
+; as per Confluence July 1 2010 end commentary
+        IF      @SCP("RDELAY_SETTING","00")
+
+R_DELAY         EQU     $000000 ; Fast serial register transfer delay
+        ENDIF
+        IF      @SCP("RDELAY_SETTING","06")
+R_DELAY		EQU	$060000	; Fast serial regisiter transfer delay.  Set to $0x060000
+	ENDIF
+
+
+CDS_TIM		EQU	$030000 ; Delay for single clock between reset & data
+
+; bitwise symbols for integrator manipulation.
+; Video processor bit definition
+;             6     5    4     3      2        1         0
+;	     xfer, A/D, integ, Pol-, fixed 0, DCrestore, rst (1 => switch open)
+; for the ARC-47 1C (incl. all of gen-ii) it was
+;	     xfer, A/D, integ, Pol+, Pol-,    DCrestore, rst (1 => switch open)
+
+; goes with VIDEO
+INT_INIT	EQU	%1111000	; Change nearly everything
+; goes with VIDEO
+INT_RSTOFF	EQU	%1111011	; Stop resetting integrator
+; goes with VIDEO and INT_TIM
+INT_MINUS	EQU	%0001011	; Integrate reset level
+; goes with VIDEO 
+INT_STOP	EQU	%0010011	; Stop Integrate
+; goes with VIDEO and INT_TIM
+INT_PLUS	EQU	%0000011	; Integrate signal level
+; goes with VIDEO and ADC_TIM
+INT_SMPL	EQU	%0010011	; Stop integrate, A/D is sampling
+; goes with VIDEO 
+INT_DCR		EQU	%0010000	; Reset integ. and DC restore
+
+
+; DEEP DEPLETION LEVELS
+; These are available for use during integration & readout
+
+; Clock voltages in volts 
+RG_HI_D	EQU	+9.0	; Reset
+RG_LO_D	EQU	-3.0	;
+R_HI_D	EQU	+8.0	; Serials
+R_LO_D	EQU	-2.0	; 
+SW_HI_D	EQU	+8.0	; Summing well, mode 1
+SW_LO_D	EQU	-2.0	; 
+SI_HI_D	EQU	+9.0	; Parallels
+SI_LO_D	EQU -3.0	;
+DG_HI_D	EQU	+9.0	; Dump Gate
+DG_LO_D	EQU	-3.0	;
+
+; DC Bias voltages in volts
+VOD_D	EQU	28.5	; Output Drain Left.
+; VOD is 1 volt lower than specified because of IR drop in lopass filts.
+VRD_D	EQU	16.0	; Reset Drain Left 
+;VRD     EQU     18.0    ; Reset Drain Left
+
+VOG1_D	EQU	 0.0	; output Gate 1
+VOG2_D	EQU	+1.0	; Output Gate 2
+VDD_D	EQU	+21.0	; Dump Drain
+VSG_D	EQU	-3.0	; Spare Gate
+
+; from gwaves_CCD67.  Not used in this DSP.
+; these don't fit into the 3 level scheme, so comment out.
+;VABG    EQU     -6.0    ; Anti-blooming gate
+PWR_D    EQU     +6.0    ; Preamp power - xxx Not used, keep as placeholder
+
+
+OFFSET	EQU	$2640		
+;OFFSET0	EQU	$2CB2	; e2v E, Peter's C, board 0, ch 0
+; FOR ENG grade!
+;OFFSET0	EQU	$28B2	; e2v E, Peter's C, board 0, ch 0
+; FOR SCI grade!
+OFFSET0	EQU	$2300	; e2v E, Peter's C, board 0, ch 0
+
+;OFFSET1	EQU	$2A17	; e2v F, Peter's D, board 0, ch 1
+; FOR ENG grade!
+;OFFSET1	EQU	$2617	; e2v F, Peter's D, board 0, ch 1
+; FOR SCI grade!
+OFFSET1	EQU	$2377	; e2v F, Peter's D, board 0, ch 1
+
+;OFFSET2	EQU	$2F3C	; e2v G, Peter's B, board 1, ch 0
+; FOR ENG grade!
+;OFFSET2	EQU	$7B3C	; e2v G, Peter's B, board 1, ch 0
+; FOR SCI grade!
+OFFSET2	EQU	$1B00	; deveny, bare ctrlr bias ~1000 ADU
+
+;OFFSET3	EQU	$2640	; e2v H, Peter's A, board 1, ch 1
+; FOR ENG AND SCI grade!
+;OFFSET3	EQU	$2240	; e2v H, Peter's A, board 1, ch 1
+;OFFSET3	EQU	$1B00	; deveny, bare ctrlr bias ~1000 ADU
+OFFSET3	EQU	$1E20	; deveny, bare ctrlr bias ~1000 ADU
+
+; INVERTED LEVELS
+; These are available for use during startup & idling
+; they are the DD levels minus 9 volts
+
+; Clock voltages in volts 
+RG_HI_I	EQU	+4.0	; Reset
+RG_LO_I	EQU	-8.0	;
+R_HI_I	EQU	+4.0	; Serials
+R_LO_I	EQU	-7.0	; 
+SW_HI_I	EQU	+4.0	; Summing well, mode 1
+SW_LO_I	EQU	-7.0	; 
+SI_HI_I	EQU	+4.0	; Parallels
+SI_LO_I	EQU -8.0	;
+DG_HI_I	EQU	+4.0	; Dump Gate
+DG_LO_I	EQU	-8.0	;
+
+; DC Bias voltages in volts
+VOD_I	EQU	22.5	; Output Drain Left. 
+; VOD is 1 volt lower than specified because of IR drop in lopass filts.
+VRD_I	EQU	10.0	; Reset Drain Left 
+;VRD     EQU     18.0    ; Reset Drain Left
+
+VOG1_I	EQU	-5.0	; output Gate 1
+VOG2_I	EQU	-4.0	; Output Gate 2
+VDD_I	EQU	+16.0	; Dump Drain
+VSG_I	EQU	-8.0	; Spare Gate
+
+; from gwaves_CCD67.  Not used in this DSP.
+; these don't fit into the 3 level scheme, so comment out.
+;VABG    EQU     -6.0    ; Anti-blooming gate
+PWR_I    EQU     +6.0    ; Preamp power - xxx Not used, keep as placeholder
+
+; TRANSITION LEVELS
+; These are available for the sole purpose of buffering voltage swings
+
+; Clock voltages in volts 
+RG_HI_T	EQU	+4.0	; Reset
+RG_LO_T	EQU	-3.0	;
+R_HI_T	EQU	+4.0	; Serials
+R_LO_T	EQU	-2.0	; 
+SW_HI_T	EQU	+4.0	; Summing well, mode 1
+SW_LO_T	EQU	-2.0	; 
+SI_HI_T	EQU	+4.0	; Parallels
+SI_LO_T	EQU -3.0	;
+DG_HI_T	EQU	+4.0	; Dump Gate
+DG_LO_T	EQU	-3.0	;
+
+; DC Bias voltages in volts
+VOD_T	EQU	22.5	; Output Drain Left. 
+; VOD is 1 volt lower than specified because of IR drop in lopass filts.
+VRD_T	EQU	10.0	; Reset Drain Left 
+;VRD     EQU     18.0    ; Reset Drain Left
+
+VOG1_T	EQU	 0.0	; output Gate 1
+VOG2_T	EQU	+1.0	; Output Gate 2
+VDD_T	EQU	+16.0	; Dump Drain
+VSG_T	EQU	-3.0	; Spare Gate
+
+; from gwaves_CCD67.  Not used in this DSP.
+; these don't fit into the 3 level scheme, so comment out.
+;VABG    EQU     -6.0    ; Anti-blooming gate
+PWR_T     EQU     +6.0    ; Preamp power - xxx Not used, keep as placeholder
+
+
+; Define switch state bits for the lower CCD clock driver bank CLK2
+; The CCD42-10 uses only 5 fast clocks.  It has only one amplifier.
+; The fast clocks are out of order to make the cable work better
+;SEH1	EQU	1	; Serial #1 E & H registers, Pin 1 - clock 0
+;SEH2	EQU	2	; Serial #2 E & H registers, Pin 2 - clock 1
+;SEH3	EQU	4	; Serial #3 E & F registers, Pin 3 - clock 2
+;SFG1	EQU	8	; Serial #1 F & G registers, Pin 4 - clock 3
+S3	EQU	$10		; Serial #3,	Pin 5 - clock 4
+R	EQU	$20		; Reset Gate,	Pin 6 - clock 5
+SW	EQU	$40		; Summing well, Pin 7 - clock 6
+S2	EQU	$80		; Serial #2,	Pin 8 - clock 7
+S1	EQU	$100	; Serial #1,	Pin 9 - clock 8
+;RFG	EQU	$200	; Reset Gate F & G registers, Pin 10 - clock 9
+
+; Define switch state bits for the upper CCD clock driver bank CLK3
+; Only 4 of these are used.  The 42-10 has no transfer gate.
+P1	EQU	1	; Parallel A & B, phase #1, Pin 13 - clock 12
+P2	EQU	2	; Parallel A & B, phase #2, Pin 14 - clock 13
+P3	EQU	4	; Parallel A & B, phase #3, Pin 15 - clock 14
+;AB4	EQU	8	; Parallel A & B, phase #4, Pin 16 - clock 15
+;CD1	EQU	$10	; Parallel C & D, phase #1, Pin 17 - clock 16
+;CD2	EQU	$20	; Parallel C & D, phase #2, Pin 18 - clock 17
+;CD3	EQU	$40	; Parallel C & D, phase #3, Pin 19 - clock 18
+;CD4	EQU	$80	; Parallel C & D, phase #4, Pin 33 - clock 19
+;TGA	EQU	$100	; Transfer Gate A, Pin 34 - clock 20
+;TGD	EQU	$200	; Transfer Gate D, Pin 35 - clock 21
+DG	EQU	$400	; Dump Gate, Pin 36 - clock 22
+;DGD	EQU	$800	; Dump Gate D, Pin 37 - clock 23
+
+;                                      Output end
+; ... S1  S2  S3  S1  S2  SW  OG1  OG2  Amp
+; Clock SW like S3 for unbinned operation
+
+; Columns dump into serial 1 and 2 so they need to be high for par. shift 
+; Reset and serial 1 & 2 are high between serial clock code lumps.
+; Parallels go ... 1 -> 2 -> 3 -> 1 -> register.  P2 high during int.
+
+; Serial clock convention:    R S1 S2 S3 SW
+; Parallel clock convention:  P1 P2 P3 DG
+
+; Video processor bit definition
+;	     xfer, A/D, integ, Pol+, Pol-, DCrestore, rst   (1 => switch open)
+
+SERIAL_IDLE	; Split serial during idle
+	DC	END_SERIAL_IDLE-SERIAL_IDLE-1
+	DC	CLK2+R_DELAY+R+S1+S2+00+00
+	DC	VIDEO+INT_INIT		; Change nearly everything
+	DC	CLK2+R_DELAY+0+00+S2+00+00
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+	DC	VIDEO+INT_RSTOFF	; Stop resetting integrator
+	DC	VIDEO+INT_TIM+INT_MINUS	; Integrate reset level
+	DC	VIDEO+INT_STOP		; Stop Integrate
+	DC	CLK2+CDS_TIM+0+S1+00+00+00
+	DC	VIDEO+INT_TIM+INT_PLUS	; Integrate signal level
+	DC	VIDEO+ADC_TIM+INT_SMPL	; Stop integrate, A/D is sampling
+	DC	CLK2+R_DELAY+0+S1+S2+00+00
+END_SERIAL_IDLE
+
+; The following waveforms are for binned operation.  
+
+INITIAL_CLOCK_WAVE
+	DC  END_INITIAL_CLOCK_WAVE-INITIAL_CLOCK_WAVE-1
+	DC	CLK2+R_DELAY+R+S1+S2+00+00
+	DC  VIDEO+INT_INIT		; Change nearly everything
+	DC	CLK2+R_DELAY+0+00+S2+00+00
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+END_INITIAL_CLOCK_WAVE
+        
+SERIAL_CLOCK_WAVE
+	DC   END_SERIAL_CLOCK_WAVE-SERIAL_CLOCK_WAVE-1
+	DC   CLK2+R_DELAY+0+S1+00+00+SW
+	DC   CLK2+R_DELAY+0+S1+S2+00+SW
+	DC   CLK2+R_DELAY+0+00+S2+00+SW
+	DC   CLK2+R_DELAY+0+00+S2+S3+SW
+	DC   CLK2+R_DELAY+0+00+00+S3+SW
+	DC   CLK2+R_DELAY+0+S1+00+S3+SW
+END_SERIAL_CLOCK_WAVE
+
+DCRST_LAST
+        DC      DCRST_LAST_END-DCRST_LAST-1
+	DC	VIDEO+INT_DCR		; Reset integ. and DC restore 
+DCRST_LAST_END
+        
+VIDEO_PROCESS   
+        DC      END_VIDEO_PROCESS-VIDEO_PROCESS-1
+SXMIT_VP
+;	DC  $00F082  ; OS connected to input C.  A/D data to fiber; overwritten by SOS
+	DC  $00F0C3  ; OS connected to input D.  A/D data to fiber; not overwritten by SOS
+	DC	VIDEO+INT_RSTOFF	; Stop resetting integrator
+	DC	VIDEO+INT_TIM+INT_MINUS	; Integrate reset level
+	DC	VIDEO+INT_STOP		; Stop Integrate
+CCLK_1  ; Only one amplifier, so no need to overwrite this by SOS in timmisc.s
+	DC  CLK2+CDS_TIM+0+S1+00+00+00
+	DC	VIDEO+INT_TIM+INT_PLUS	; Integrate signal level
+	DC	VIDEO+ADC_TIM+INT_SMPL	; Stop integrate, A/D is sampling
+	DC  CLK2+R_DELAY+0+S1+S2+00+00
+END_VIDEO_PROCESS
+
+; Starting Y: address of circular waveforms for no-overhead access
+STRT_CIR EQU	$C0
+;ROM_DISP	EQU	APL_NUM*N_W_APL+APL_LEN+MISC_LEN+COM_LEN+STRT_CIR
+;DAC_DISP	EQU	APL_NUM*N_W_APL+APL_LEN+MISC_LEN+COM_LEN+$100
+
+; Check for Y: data memory overflow
+	IF	@CVS(N,*)>STRT_CIR
+	WARN    'Application Y: data memory is too large!' ; Make sure Y:
+	ENDIF						   ;  will not overflow
+
+; The fast serial code with the circulating address register must start 
+;   on a boundary that is a multiple of the address register modulus.
+
+	IF	@SCP("DOWNLOAD","HOST")
+	ORG	Y:STRT_CIR,Y:STRT_CIR			; Download address
+	ELSE
+	ORG     Y:STRT_CIR,P:ROM_DISP
+	ENDIF
+
+; This is an area to copy in the serial fast binned waveforms from high Y memory
+; It is 0x28 = 40 locations long, enough to put in a binned-by-four waveform
+;	     xfer, A/D, integ, Pol+, Pol-, DCrestore, rst   (1 => switch open)
+SERIAL_READ	; Split serial during idle
+	DC	CLK2+R_DELAY+R+S1+S2+00+00
+	DC  VIDEO+INT_INIT		; Change nearly everything
+	DC	CLK2+R_DELAY+0+00+S2+00+00
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+00+SW
+	DC	CLK2+R_DELAY+R+S1+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+00+SW
+	DC	CLK2+R_DELAY+R+S1+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+00+SW
+	DC	CLK2+R_DELAY+R+S1+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+SXMIT
+	;DC	$00F082			; Transmit A/D data to host; overwritten by SOS
+	DC	$00F0C3			; Transmit A/D data to host on D; not overwritten by SOS
+	DC	VIDEO+INT_RSTOFF	; Stop resetting integrator
+	DC	VIDEO+INT_TIM+INT_MINUS	; Integrate reset level
+	DC	VIDEO+INT_STOP		; Stop Integrate
+	DC  CLK2+CDS_TIM+0+S1+00+00+00
+	DC	VIDEO+INT_TIM+INT_PLUS	; Integrate signal level
+	DC	VIDEO+ADC_TIM+INT_SMPL	; Stop integrate, A/D is sampling
+	DC  CLK2+R_DELAY+0+S1+S2+00+00
+END_SERIAL_READ
+
+
+; Serial clocking waveform for skipping
+	IF	@SCP("DOWNLOAD","HOST")
+	ORG	Y:STRT_CIR+$28,Y:STRT_CIR+$28		; Download address
+	ELSE
+	ORG     Y:STRT_CIR+$28,P:ROM_DISP+$28
+	ENDIF
+
+; There is only one serial skip waveform
+SERIAL_SKIP_WAVE
+	DC	CLK2+R_DELAY+R+S1+S2+00+00
+	DC	CLK2+R_DELAY+0+00+S2+00+00
+	DC	CLK2+R_DELAY+0+00+S2+S3+00
+	DC	CLK2+R_DELAY+0+00+00+S3+00
+	DC	CLK2+R_DELAY+0+S1+00+S3+00
+	DC	CLK2+R_DELAY+0+S1+00+00+00
+	DC	CLK2+R_DELAY+0+S1+S2+00+00
+END_SERIAL_SKIP_WAVE
+
+; Put all the following code in SRAM.
+	IF	@SCP("DOWNLOAD","HOST")
+	ORG	Y:$100,Y:$100				; Download address
+	ELSE
+	ORG	Y:$100,P:DAC_DISP
+	ENDIF
+
+; Initialization of clock driver and video processor DACs and switches
+; for DD levels used during integration & readout
+; This is for the ARC 47 4-channel video board
+DACS_DD	DC	END_DACS_DD-DACS_DD-1
+	DC	CLKV+$0A0080					; DAC = unbuffered mode
+	DC	CLKV+$000100+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #1, NC
+	DC	CLKV+$000200+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$000400+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #2, NC
+	DC	CLKV+$000800+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$002000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #3, NC
+	DC	CLKV+$004000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$008000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #4, NC
+	DC	CLKV+$010000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$020100+@CVI((R_HI_D+Vmax)/(2*Vmax)*255)	; Pin #5, S3
+	DC	CLKV+$020200+@CVI((R_LO_D+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$020400+@CVI((RG_HI_D+Vmax)/(2*Vmax)*255)	; Pin #6, Rst
+	DC	CLKV+$020800+@CVI((RG_LO_D+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$022000+@CVI((SW_HI_D+Vmax)/(2*Vmax)*255)	; Pin #7, SW
+	DC	CLKV+$024000+@CVI((SW_LO_D+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$028000+@CVI((R_HI_D+Vmax)/(2*Vmax)*255)	; Pin #8, S2
+	DC	CLKV+$030000+@CVI((R_LO_D+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$040100+@CVI((R_HI_D+Vmax)/(2*Vmax)*255)	; Pin #9, S1
+	DC	CLKV+$040200+@CVI((R_LO_D+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$040400+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #10, NC
+	DC	CLKV+$040800+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$042000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #11, NC
+	DC	CLKV+$044000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$048000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #12, NC
+	DC	CLKV+$050000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+
+	DC	CLKV+$060100+@CVI((SI_HI_D+Vmax)/(2*Vmax)*255)	; Pin #13, P1
+	DC	CLKV+$060200+@CVI((SI_LO_D+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$060400+@CVI((SI_HI_D+Vmax)/(2*Vmax)*255)	; Pin #14, P2
+	DC	CLKV+$060800+@CVI((SI_LO_D+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$062000+@CVI((SI_HI_D+Vmax)/(2*Vmax)*255)	; Pin #15, P3
+	DC	CLKV+$064000+@CVI((SI_LO_D+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$068000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #16, NC
+	DC	CLKV+$070000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$080100+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #17, NC
+	DC	CLKV+$080200+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$080400+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #18, NC
+	DC	CLKV+$080800+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$082000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #19, NC
+	DC	CLKV+$084000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$088000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #33, NC
+	DC	CLKV+$090000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$0A0100+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #34, NC
+	DC	CLKV+$0A0200+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$0A0400+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #35, NC
+	DC	CLKV+$0A0800+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$0A2000+@CVI((DG_HI_D+Vmax)/(2*Vmax)*255)	; Pin #36, DG
+	DC	CLKV+$0A4000+@CVI((DG_LO_D+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$0A8000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #37, NC
+	DC	CLKV+$0B0000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	
+; Commands for the ARC-47 video board 
+	DC	VID0+$0C0000		; Normal Image data D17-D2
+
+; Gain : $0D000g, g = 0 to %1111, Gain = 1.00 to 4.75 in steps of 0.25
+; See Bob's ARC47 manual for the gain table.
+; define for DD levels -only-
+DAC_GNSPD
+	DC	VID0+$0D000F	; This is for 4.75 gain
+;	DC	VID0+$0D0000	; fix for arc-47 gen-iii default gain 1
+
+; Integrator time constant: $0C01t0, t = 0 to %1111.
+; See Bob's ARC47 manual for integration time constant table.
+	DC	VID0+$0C0180	; integrator parameter for 0.5 us (integrator gain = 1.0)
+
+; Only make these defiitions once
+VOD_MAX	EQU	30.45
+VRD_MAX	EQU	19.90
+VOG_MAX	EQU	8.70
+DAC_ZERO EQU	$1FFF					; Bipolar
+
+; VOG and VRS have the same scale.  
+; VRD and VOD are different from VOG and each other.
+DAC_VOD_D	EQU	@CVI((VOD_D/VOD_MAX)*16384-1)		; Unipolar
+DAC_VRD_D	EQU	@CVI((VRD_D/VRD_MAX)*16384-1)		; Unipolar
+DAC_VOG1_D	EQU	@CVI(((VOG1_D+VOG_MAX)/VOG_MAX)*8192-1)	; Bipolar
+DAC_VOG2_D	EQU	@CVI(((VOG2_D+VOG_MAX)/VOG_MAX)*8192-1)	; Bipolar
+DAC_VSG_D	EQU	@CVI(((VSG_D+VOG_MAX)/VOG_MAX)*8192-1)	; Bipolar
+DAC_VDD_D	EQU	@CVI((VDD_D/VOD_MAX)*16384-1)		; Unipolar
+DAC_PWR_D	EQU	@CVI(((PWR_D+VOG_MAX)/VOG_MAX)*8192-1)	; Bipolar
+
+; Initialize the ARC-47 DAC For DC_BIAS
+	DC	VID0+DAC_ADDR+$000000		; Vod0, pin 52, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+	DC	VID0+DAC_ADDR+$000004		; Vrd0, pin 13, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$000008		; Vog0, pin 29, SG
+	DC	VID0+DAC_RegD+DAC_VSG_D		
+	DC	VID0+DAC_ADDR+$00000C		; Vrs0, pin 5, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+
+	DC	VID0+DAC_ADDR+$000001		; Vod1, pin 32, OD
+	DC	VID0+DAC_RegD+DAC_VOD_D
+	DC	VID0+DAC_ADDR+$000005		; Vrd1, pin 55, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$000009		; Vog1, pin 8, NC
+	DC	VID0+DAC_RegD+DAC_ZERO		
+	DC	VID0+DAC_ADDR+$00000D		; Vrs1, pin 47, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+
+	DC	VID0+DAC_ADDR+$000002		; Vod2, pin 11, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+	DC	VID0+DAC_ADDR+$000006		; Vrd2, pin 35, RD
+	DC	VID0+DAC_RegD+DAC_VRD_D	
+	DC	VID0+DAC_ADDR+$00000A		; Vog2, pin 50, NC
+	DC	VID0+DAC_RegD+DAC_ZERO		
+	DC	VID0+DAC_ADDR+$00000E		; Vrs2, pin 27, OG2
+	DC	VID0+DAC_RegD+DAC_VOG2_D
+	
+	DC	VID0+DAC_ADDR+$000003		; Vod3, pin 53, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+	DC	VID0+DAC_ADDR+$000007		; Vrd3, pin 14, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$00000B		; Vog3, pin 30, OG1
+	DC	VID0+DAC_RegD+DAC_VOG1_D	
+	DC	VID0+DAC_ADDR+$00000F		; Vrs3, pin 6, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+		
+	DC	VID0+DAC_ADDR+$000010		; Vod4, pin 33, DD
+	DC	VID0+DAC_RegD+DAC_VDD_D
+	DC	VID0+DAC_ADDR+$000011		; Vrd4, pin 56, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$000012		; Vog4, pin 9, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$000013		; Vrs4,pin 48, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+
+; Initialize the ARC-47 DAC For Video Offsets
+	DC	VID0+DAC_ADDR+$000014
+	DC	VID0+DAC_RegD+OFFSET0
+	DC	VID0+DAC_ADDR+$000015
+	DC	VID0+DAC_RegD+OFFSET1
+	DC	VID0+DAC_ADDR+$000016
+	DC	VID0+DAC_RegD+OFFSET2
+	DC	VID0+DAC_ADDR+$000017
+	DC	VID0+DAC_RegD+OFFSET3
+
+END_DACS_DD
+
+; Initialization of clock driver and video processor DACs and switches
+
+; for Inverted levels used during startup & idling
+; This is for the ARC 47 4-channel video board
+DACS_INV	DC	END_DACS_INV-DACS_INV-1
+	DC	CLKV+$0A0080					; DAC = unbuffered mode
+	DC	CLKV+$000100+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #1, NC
+	DC	CLKV+$000200+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$000400+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #2, NC
+	DC	CLKV+$000800+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$002000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #3, NC
+	DC	CLKV+$004000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$008000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #4, NC
+	DC	CLKV+$010000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$020100+@CVI((R_HI_I+Vmax)/(2*Vmax)*255)	; Pin #5, S3
+	DC	CLKV+$020200+@CVI((R_LO_I+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$020400+@CVI((RG_HI_I+Vmax)/(2*Vmax)*255)	; Pin #6, Rst
+	DC	CLKV+$020800+@CVI((RG_LO_I+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$022000+@CVI((SW_HI_I+Vmax)/(2*Vmax)*255)	; Pin #7, SW
+	DC	CLKV+$024000+@CVI((SW_LO_I+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$028000+@CVI((R_HI_I+Vmax)/(2*Vmax)*255)	; Pin #8, S2
+	DC	CLKV+$030000+@CVI((R_LO_I+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$040100+@CVI((R_HI_I+Vmax)/(2*Vmax)*255)	; Pin #9, S1
+	DC	CLKV+$040200+@CVI((R_LO_I+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$040400+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #10, NC
+	DC	CLKV+$040800+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$042000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #11, NC
+	DC	CLKV+$044000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$048000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #12, NC
+	DC	CLKV+$050000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+
+	DC	CLKV+$060100+@CVI((SI_HI_I+Vmax)/(2*Vmax)*255)	; Pin #13, P1
+	DC	CLKV+$060200+@CVI((SI_LO_I+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$060400+@CVI((SI_HI_I+Vmax)/(2*Vmax)*255)	; Pin #14, P2
+	DC	CLKV+$060800+@CVI((SI_LO_I+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$062000+@CVI((SI_HI_I+Vmax)/(2*Vmax)*255)	; Pin #15, P3
+	DC	CLKV+$064000+@CVI((SI_LO_I+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$068000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #16, NC
+	DC	CLKV+$070000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$080100+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #17, NC
+	DC	CLKV+$080200+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$080400+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #18, NC
+	DC	CLKV+$080800+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$082000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #19, NC
+	DC	CLKV+$084000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$088000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #33, NC
+	DC	CLKV+$090000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$0A0100+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #34, NC
+	DC	CLKV+$0A0200+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$0A0400+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #35, NC
+	DC	CLKV+$0A0800+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$0A2000+@CVI((DG_HI_I+Vmax)/(2*Vmax)*255)	; Pin #36, DG
+	DC	CLKV+$0A4000+@CVI((DG_LO_I+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$0A8000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #37, NC
+	DC	CLKV+$0B0000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	
+; Commands for the ARC-47 video board 
+	DC	VID0+$0C0000		; Normal Image data D17-D2
+
+; Gain : $0D000g, g = 0 to %1111, Gain = 1.00 to 4.75 in steps of 0.25
+; See Bob's ARC47 manual for the gain table.
+; the label is not defined here- the setgain command will not touch
+;DAC_GNSPD
+	DC	VID0+$0D000F	; This is for 4.75 gain
+;	DC	VID0+$0D0000	; fix for arc-47 gen-iii default gain 1
+
+; Integrator time constant: $0C01t0, t = 0 to %1111.
+; See Bob's ARC47 manual for integration time constant table.
+	DC	VID0+$0C0180	; integrator parameter for 0.5 us (integrator gain = 1.0)
+	
+; VOG and VRS have the same scale.  
+; VRD and VOD are different from VOG and each other.
+DAC_VOD_I	EQU	@CVI((VOD_I/VOD_MAX)*16384-1)		; Unipolar
+DAC_VRD_I	EQU	@CVI((VRD_I/VRD_MAX)*16384-1)		; Unipolar
+DAC_VOG1_I	EQU	@CVI(((VOG1_I+VOG_MAX)/VOG_MAX)*8192-1)	; Bipolar
+DAC_VOG2_I	EQU	@CVI(((VOG2_I+VOG_MAX)/VOG_MAX)*8192-1)	; Bipolar
+DAC_VSG_I	EQU	@CVI(((VSG_I+VOG_MAX)/VOG_MAX)*8192-1)	; Bipolar
+DAC_VDD_I	EQU	@CVI((VDD_I/VOD_MAX)*16384-1)		; Unipolar
+DAC_PWR_I	EQU	@CVI(((PWR_I+VOG_MAX)/VOG_MAX)*8192-1)	; Bipolar
+
+; Initialize the ARC-47 DAC For DC_BIAS
+	DC	VID0+DAC_ADDR+$000000		; Vod0, pin 52, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+	DC	VID0+DAC_ADDR+$000004		; Vrd0, pin 13, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$000008		; Vog0, pin 29, SG
+	DC	VID0+DAC_RegD+DAC_VSG_I		
+	DC	VID0+DAC_ADDR+$00000C		; Vrs0, pin 5, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+
+	DC	VID0+DAC_ADDR+$000001		; Vod1, pin 32, OD
+	DC	VID0+DAC_RegD+DAC_VOD_I
+	DC	VID0+DAC_ADDR+$000005		; Vrd1, pin 55, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$000009		; Vog1, pin 8, NC
+	DC	VID0+DAC_RegD+DAC_ZERO		
+	DC	VID0+DAC_ADDR+$00000D		; Vrs1, pin 47, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+
+	DC	VID0+DAC_ADDR+$000002		; Vod2, pin 11, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+	DC	VID0+DAC_ADDR+$000006		; Vrd2, pin 35, RD
+	DC	VID0+DAC_RegD+DAC_VRD_I	
+	DC	VID0+DAC_ADDR+$00000A		; Vog2, pin 50, NC
+	DC	VID0+DAC_RegD+DAC_ZERO		
+	DC	VID0+DAC_ADDR+$00000E		; Vrs2, pin 27, OG2
+	DC	VID0+DAC_RegD+DAC_VOG2_I
+	
+	DC	VID0+DAC_ADDR+$000003		; Vod3, pin 53, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+	DC	VID0+DAC_ADDR+$000007		; Vrd3, pin 14, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$00000B		; Vog3, pin 30, OG1
+	DC	VID0+DAC_RegD+DAC_VOG1_I	
+	DC	VID0+DAC_ADDR+$00000F		; Vrs3, pin 6, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+		
+	DC	VID0+DAC_ADDR+$000010		; Vod4, pin 33, DD
+	DC	VID0+DAC_RegD+DAC_VDD_I
+	DC	VID0+DAC_ADDR+$000011		; Vrd4, pin 56, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$000012		; Vog4, pin 9, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$000013		; Vrs4,pin 48, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+
+; Initialize the ARC-47 DAC For Video Offsets
+	DC	VID0+DAC_ADDR+$000014
+	DC	VID0+DAC_RegD+OFFSET0
+	DC	VID0+DAC_ADDR+$000015
+	DC	VID0+DAC_RegD+OFFSET1
+	DC	VID0+DAC_ADDR+$000016
+	DC	VID0+DAC_RegD+OFFSET2
+	DC	VID0+DAC_ADDR+$000017
+	DC	VID0+DAC_RegD+OFFSET3
+
+END_DACS_INV
+
+
+; Initialization of clock driver and video processor DACs and switches
+
+; for Transition levels used moving to or from the DD levels
+; This is for the ARC 47 4-channel video board
+DACS_TRANS	DC	END_DACS_TRANS-DACS_TRANS-1
+	DC	CLKV+$0A0080					; DAC = unbuffered mode
+	DC	CLKV+$000100+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #1, NC
+	DC	CLKV+$000200+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$000400+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #2, NC
+	DC	CLKV+$000800+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$002000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #3, NC
+	DC	CLKV+$004000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$008000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #4, NC
+	DC	CLKV+$010000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$020100+@CVI((R_HI_T+Vmax)/(2*Vmax)*255)	; Pin #5, S3
+	DC	CLKV+$020200+@CVI((R_LO_T+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$020400+@CVI((RG_HI_T+Vmax)/(2*Vmax)*255)	; Pin #6, Rst
+	DC	CLKV+$020800+@CVI((RG_LO_T+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$022000+@CVI((SW_HI_T+Vmax)/(2*Vmax)*255)	; Pin #7, SW
+	DC	CLKV+$024000+@CVI((SW_LO_T+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$028000+@CVI((R_HI_T+Vmax)/(2*Vmax)*255)	; Pin #8, S2
+	DC	CLKV+$030000+@CVI((R_LO_T+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$040100+@CVI((R_HI_I+Vmax)/(2*Vmax)*255)	; Pin #9, S1
+	DC	CLKV+$040200+@CVI((R_LO_T+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$040400+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #10, NC
+	DC	CLKV+$040800+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$042000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #11, NC
+	DC	CLKV+$044000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$048000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #12, NC
+	DC	CLKV+$050000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+
+	DC	CLKV+$060100+@CVI((SI_HI_T+Vmax)/(2*Vmax)*255)	; Pin #13, P1
+	DC	CLKV+$060200+@CVI((SI_LO_T+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$060400+@CVI((SI_HI_T+Vmax)/(2*Vmax)*255)	; Pin #14, P2
+	DC	CLKV+$060800+@CVI((SI_LO_T+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$062000+@CVI((SI_HI_T+Vmax)/(2*Vmax)*255)	; Pin #15, P3
+	DC	CLKV+$064000+@CVI((SI_LO_T+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$068000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #16, NC
+	DC	CLKV+$070000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$080100+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #17, NC
+	DC	CLKV+$080200+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$080400+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #18, NC
+	DC	CLKV+$080800+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$082000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #19, NC
+	DC	CLKV+$084000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$088000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #33, NC
+	DC	CLKV+$090000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$0A0100+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #34, NC
+	DC	CLKV+$0A0200+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$0A0400+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #35, NC
+	DC	CLKV+$0A0800+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$0A2000+@CVI((DG_HI_T+Vmax)/(2*Vmax)*255)	; Pin #36, DG
+	DC	CLKV+$0A4000+@CVI((DG_LO_T+Vmax)/(2*Vmax)*255)
+	DC	CLKV+$0A8000+@CVI((ZERO+Vmax)/(2*Vmax)*255)	; Pin #37, NC
+	DC	CLKV+$0B0000+@CVI((ZERO+Vmax)/(2*Vmax)*255)
+	
+; Commands for the ARC-47 video board 
+	DC	VID0+$0C0000		; Normal Image data D17-D2
+
+; Gain : $0D000g, g = 0 to %1111, Gain = 1.00 to 4.75 in steps of 0.25
+; See Bob's ARC47 manual for the gain table.
+; the label is not defined here- the setgain command will not touch
+;DAC_GNSPD
+	DC	VID0+$0D000F	; This is for 4.75 gain
+;	DC	VID0+$0D0000	; fix for arc-47 gen-iii default gain 1
+
+; Integrator time constant: $0C01t0, t = 0 to %1111.
+; See Bob's ARC47 manual for integration time constant table.
+	DC	VID0+$0C0180	; integrator parameter for 0.5 us (integrator gain = 1.0)
+	
+; VOG and VRS have the same scale.  
+; VRD and VOD are different from VOG and each other.
+DAC_VOD_T	EQU	@CVI((VOD_T/VOD_MAX)*16384-1)		; Unipolar
+DAC_VRD_T	EQU	@CVI((VRD_T/VRD_MAX)*16384-1)		; Unipolar
+DAC_VOG1_T	EQU	@CVI(((VOG1_T+VOG_MAX)/VOG_MAX)*8192-1)	; Bipolar
+DAC_VOG2_T	EQU	@CVI(((VOG2_T+VOG_MAX)/VOG_MAX)*8192-1)	; Bipolar
+DAC_VSG_T	EQU	@CVI(((VSG_T+VOG_MAX)/VOG_MAX)*8192-1)	; Bipolar
+DAC_VDD_T	EQU	@CVI((VDD_T/VOD_MAX)*16384-1)		; Unipolar
+DAC_PWR_T	EQU	@CVI(((PWR_T+VOG_MAX)/VOG_MAX)*8192-1)	; Bipolar
+
+; Initialize the ARC-47 DAC For DC_BIAS
+	DC	VID0+DAC_ADDR+$000000		; Vod0, pin 52, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+	DC	VID0+DAC_ADDR+$000004		; Vrd0, pin 13, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$000008		; Vog0, pin 29, SG
+	DC	VID0+DAC_RegD+DAC_VSG_T		
+	DC	VID0+DAC_ADDR+$00000C		; Vrs0, pin 5, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+
+	DC	VID0+DAC_ADDR+$000001		; Vod1, pin 32, OD
+	DC	VID0+DAC_RegD+DAC_VOD_T
+	DC	VID0+DAC_ADDR+$000005		; Vrd1, pin 55, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$000009		; Vog1, pin 8, NC
+	DC	VID0+DAC_RegD+DAC_ZERO		
+	DC	VID0+DAC_ADDR+$00000D		; Vrs1, pin 47, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+
+	DC	VID0+DAC_ADDR+$000002		; Vod2, pin 11, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+	DC	VID0+DAC_ADDR+$000006		; Vrd2, pin 35, RD
+	DC	VID0+DAC_RegD+DAC_VRD_T	
+	DC	VID0+DAC_ADDR+$00000A		; Vog2, pin 50, NC
+	DC	VID0+DAC_RegD+DAC_ZERO		
+	DC	VID0+DAC_ADDR+$00000E		; Vrs2, pin 27, OG2
+	DC	VID0+DAC_RegD+DAC_VOG2_T
+	
+	DC	VID0+DAC_ADDR+$000003		; Vod3, pin 53, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+	DC	VID0+DAC_ADDR+$000007		; Vrd3, pin 14, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$00000B		; Vog3, pin 30, OG1
+	DC	VID0+DAC_RegD+DAC_VOG1_T	
+	DC	VID0+DAC_ADDR+$00000F		; Vrs3, pin 6, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+		
+	DC	VID0+DAC_ADDR+$000010		; Vod4, pin 33, DD
+	DC	VID0+DAC_RegD+DAC_VDD_T
+	DC	VID0+DAC_ADDR+$000011		; Vrd4, pin 56, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$000012		; Vog4, pin 9, NC
+	DC	VID0+DAC_RegD+DAC_ZERO	
+	DC	VID0+DAC_ADDR+$000013		; Vrs4,pin 48, NC
+	DC	VID0+DAC_RegD+DAC_ZERO
+
+; Initialize the ARC-47 DAC For Video Offsets
+	DC	VID0+DAC_ADDR+$000014
+	DC	VID0+DAC_RegD+OFFSET0
+	DC	VID0+DAC_ADDR+$000015
+	DC	VID0+DAC_RegD+OFFSET1
+	DC	VID0+DAC_ADDR+$000016
+	DC	VID0+DAC_RegD+OFFSET2
+	DC	VID0+DAC_ADDR+$000017
+	DC	VID0+DAC_RegD+OFFSET3
+
+END_DACS_TRANS
+
+;  ***  Definitions for Y: memory waveform tables  *****
+; Put the parallel clock waveforms in slow external Y memory since there isn't 
+; enough room in the fast memory for everything we need.  
+
+; Columns dump into serial 1 and 2 so they need to be high for par. shift 
+; Reset and serial 1 & 2 are high between serial clock code lumps.
+; Parallels go ... 1 -> 2 -> 3 -> 1 -> register.  P2 high during int.
+
+; Serial clock convention:    R S1 S2 S3 SW
+; Parallel clock convention:  P1 P2 P3 DG
+
+; ADD DC RESTORE based on gwaves!
+; Clock whole CCD down toward the serial register.  Serial phases 1 & 2 high.
+PARALLEL
+	DC	END_PARALLEL-PARALLEL-1
+	DC	VIDEO+INT_DCR		; Reset integ. and DC restore 
+	DC	CLK2+SI_DELAY+R+S1+S2+00+00
+	DC	CLK3+SI_DELAY+00+P2+P3+00
+	DC	CLK3+SI_DELAY+00+00+P3+00
+	DC	CLK3+SI_DELAY+P1+00+P3+00
+	DC	CLK3+SI_DELAY+P1+00+00+00
+	DC	CLK3+SI_DELAY+P1+P2+00+00
+	DC	CLK3+SI_DELAY+00+P2+00+00
+END_PARALLEL
+
+; Clear whole CCD down toward the serial register.  Serial phases 1 & 2 high.
+; ADD DC RESTORE based on gwaves!
+PARALLEL_CLEAR
+	DC	END_PARALLEL_CLEAR-PARALLEL_CLEAR-1
+	DC	VIDEO+INT_DCR		; Reset integ. and DC restore 
+	DC	CLK2+SI_DELAY+R+S1+S2+00+00
+	DC	CLK3+SI_DELAY+00+P2+P3+DG
+	DC	CLK3+SI_DELAY+00+00+P3+DG
+	DC	CLK3+SI_DELAY+P1+00+P3+DG
+	DC	CLK3+SI_DELAY+P1+00+00+DG
+	DC	CLK3+SI_DELAY+P1+P2+00+DG
+	DC	CLK3+SI_DELAY+00+P2+00+DG
+	DC	CLK2+SI_DELAY+R+00+00+00+00
+	DC	CLK3+SI_DELAY+00+P2+00+00
+	DC	CLK2+SI_DELAY+R+S1+S2+00+00
+END_PARALLEL_CLEAR
+
+; Dump the serial register using DG
+DUMP_SERIAL
+	DC	END_DUMP_SERIAL-DUMP_SERIAL-1
+	DC	CLK2+DG_DELAY+R+S1+S2+00+00
+	DC	CLK3+DG_DELAY+00+P2+00+DG
+	DC	CLK2+DG_DELAY+R+00+00+00+00
+	DC	CLK3+DG_DELAY+00+P2+00+00
+	DC	CLK2+DG_DELAY+R+S1+S2+00+00
+END_DUMP_SERIAL
+
+; Parallel waveforms done.  Move on to the layered serial ones.
+
+; These are the 4 fast serial read waveforms for binning factors from 1 to 4.
+
+;	Unbinned waveform
+;	xfer, A/D, integ, Pol+, Pol-, DCrestore, rst   (1 => switch open)
+SERIAL_READ_1
+	DC	CLK2+R_DELAY+R+S1+S2+00+00
+	DC      VIDEO+INT_INIT		; Change nearly everything
+	DC	CLK2+R_DELAY+0+00+S2+00+00
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+SXMIT_1
+;	DC	$00F082			; Transmit A/D data to host; overwritten by SOS
+	DC	$00F0C3			; Transmit A/D data to host on D; not overwritten by SOS
+	DC	VIDEO+INT_RSTOFF	; Stop resetting integrator
+	DC	VIDEO+INT_TIM+INT_MINUS	; Integrate reset level
+	DC	VIDEO+INT_STOP		; Stop Integrate
+	DC  CLK2+CDS_TIM+0+S1+00+00+00
+	DC	VIDEO+INT_TIM+INT_PLUS	; Integrate signal level
+	DC	VIDEO+ADC_TIM+INT_SMPL	; Stop integrate, A/D is sampling
+	DC  CLK2+R_DELAY+0+S1+S2+00+00
+END_SERIAL_READ_1
+
+;	Bin by 2 waveform
+;	xfer, A/D, integ, Pol+, Pol-, DCrestore, rst   (1 => switch open)
+SERIAL_READ_2
+	DC	CLK2+R_DELAY+R+S1+S2+00+00
+	DC      VIDEO+INT_INIT		; Change nearly everything
+	DC	CLK2+R_DELAY+0+00+S2+00+00
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+00+SW
+	DC	CLK2+R_DELAY+R+S1+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+SXMIT_2
+;	DC	$00F082			; Transmit A/D data to host; overwritten by SOS
+	DC	$00F0C3			; Transmit A/D data to host on D; not overwritten by SOS
+	DC	VIDEO+INT_RSTOFF	; Stop resetting integrator
+	DC	VIDEO+INT_TIM+INT_MINUS	; Integrate reset level
+	DC	VIDEO+INT_STOP		; Stop Integrate
+	DC  CLK2+CDS_TIM+0+S1+00+00+00
+	DC	VIDEO+INT_TIM+INT_PLUS	; Integrate signal level
+	DC	VIDEO+ADC_TIM+INT_SMPL	; Stop integrate, A/D is sampling
+	DC  CLK2+R_DELAY+0+S1+S2+00+00
+END_SERIAL_READ_2
+
+;	Bin by 3 waveform
+;	xfer, A/D, integ, Pol+, Pol-, DCrestore, rst   (1 => switch open)
+SERIAL_READ_3
+	DC	CLK2+R_DELAY+R+S1+S2+00+00
+	DC      VIDEO+INT_INIT		; Change nearly everything
+	DC	CLK2+R_DELAY+0+00+S2+00+00
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+00+SW
+	DC	CLK2+R_DELAY+R+S1+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+00+SW
+	DC	CLK2+R_DELAY+R+S1+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+SXMIT_3
+;	DC	$00F082			; Transmit A/D data to host; overwritten by SOS
+	DC	$00F0C3			; Transmit A/D data to host on D; not overwritten by SOS
+	DC	VIDEO+INT_RSTOFF	; Stop resetting integrator
+	DC	VIDEO+INT_TIM+INT_MINUS	; Integrate reset level
+	DC	VIDEO+INT_STOP		; Stop Integrate
+	DC  CLK2+CDS_TIM+0+S1+00+00+00
+	DC	VIDEO+INT_TIM+INT_PLUS	; Integrate signal level
+	DC	VIDEO+ADC_TIM+INT_SMPL	; Stop integrate, A/D is sampling
+	DC  CLK2+R_DELAY+0+S1+S2+00+00
+END_SERIAL_READ_3
+
+;	Bin by 4 waveforms
+;	xfer, A/D, integ, Pol+, Pol-, DCrestore, rst   (1 => switch open)
+SERIAL_READ_4
+	DC	CLK2+R_DELAY+R+S1+S2+00+00
+	DC      VIDEO+INT_INIT		; Change nearly everything
+	DC	CLK2+R_DELAY+0+00+S2+00+00
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+00+SW
+	DC	CLK2+R_DELAY+R+S1+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+00+SW
+	DC	CLK2+R_DELAY+R+S1+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+00+SW
+	DC	CLK2+R_DELAY+R+S1+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+00+SW
+	DC	CLK2+R_DELAY+0+00+S2+S3+SW
+	DC	CLK2+R_DELAY+0+00+00+S3+SW
+	DC	CLK2+R_DELAY+0+S1+00+S3+SW
+SXMIT_4
+;	DC	$00F082			; Transmit A/D data to host; overwritten by SOS
+	DC	$00F0C3			; Transmit A/D data to host on D; not overwritten by SOS
+	DC	VIDEO+INT_RSTOFF	; Stop resetting integrator
+	DC	VIDEO+INT_TIM+INT_MINUS	; Integrate reset level
+	DC	VIDEO+INT_STOP		; Stop Integrate
+	DC  CLK2+CDS_TIM+0+S1+00+00+00
+	DC	VIDEO+INT_TIM+INT_PLUS	; Integrate signal level
+	DC	VIDEO+ADC_TIM+INT_SMPL	; Stop integrate, A/D is sampling
+	DC  CLK2+R_DELAY+0+S1+S2+00+00
+END_SERIAL_READ_4

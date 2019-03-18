@@ -1,0 +1,4 @@
+This utility code includes the temperature metaregulation code.  It isn't
+exactly the code that the DeVeny runs.  The difference is the value of 
+HTMAX in utilappl.s and the creation time in utilinfo.s.  See
+DSP Code Versions.txt for further details.
