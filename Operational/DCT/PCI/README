@@ -1,0 +1,6 @@
+This is the version last on nasa42 from plcdsp called v1.7_7_5x.
+
+This has been modified for gen-iii ccd boards and will be used with gwaves.
+
+This PCI code is used with all the DCT instruments: the guiders (including 
+the CCD57 test system), LMI, DeVeny, and NIHTS.

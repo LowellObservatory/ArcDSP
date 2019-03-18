@@ -1,0 +1,52 @@
+Prefix: PCI_DSP_
+MemPrefix: PCI_MEM_
+
+//* These are the locations in X memory space that are available for
+/ * application code to communicate with the PCI card in the Leach CCD
+/ * electronics.
+/ */
+/
+/
+/// The low and hi order (lo 16 bits only on each!) parts of the
+/// PCI circular buffer size set by the application for continuous mode.
+PCI_BUFSIZE_0 X
+PCI_BUFSIZE_1 X
+/ 
+/ 
+/// Count of pci retries and errors for the entire image.
+PCI_ERRS X
+/// The count of pci retries and errors for the "last little bit" image 
+/// processing.
+PCI_LSTERRS X
+/// Variable application must SET non-zero to enable pci detail error log.
+PCI_ERRLOG X
+/// 24 bit DSP code version number.
+DSP_VERS X
+/
+/
+/// DSP independent INF parameters
+/
+/// Standard INFO version word
+GET_VERSION N
+/// Standard INFO flavor word
+GET_FLAVOR N
+/// Standard INFO make time (lo) word
+GET_TIME0 N
+/// Standard INFO make time (hi) word
+GET_TIME1 N
+/// Standard INFO svn rev word
+GET_SVNREV N
+/
+/// pci DSP dependent INF parameters
+/
+/// Standard INFO capabilities word
+GET_CAPABLE   N
+/
+/// Values for the TIM capabilities word
+/
+/// RDA Workaround  capable
+RDACAPABLE   N
+/// History log capable
+HISTCAPABLE   N
+/// Timer capable
+TIMCAPABLE   N
